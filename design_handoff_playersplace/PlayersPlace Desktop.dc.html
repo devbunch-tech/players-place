@@ -1,0 +1,957 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Archivo:ital,wght@0,400..800;1,400..800&display=swap" rel="stylesheet">
+<style>
+  body{margin:0;background:#DDDFD4;}
+  a{color:#0E4632;text-decoration:none;}
+  a:hover{color:#0A3325;text-decoration:underline;}
+  @keyframes ppPulse{0%,100%{opacity:1;}50%{opacity:.25;}}
+  @keyframes ppIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+</style>
+</helmet>
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:36px 24px;box-sizing:border-box;background:#DDDFD4;">
+<x-import component-from-global-scope="ChromeWindow" from="./browser-window.jsx" url="playersplace.com" width="{{ bwW }}" height="{{ bwH }}" hint-size="1360px,860px">
+<div style="height:100%;display:flex;flex-direction:column;overflow:hidden;background:#F3F4EF;font-family:'Archivo',sans-serif;color:#131711;">
+
+  <!-- ══════════ TOP NAV ══════════ -->
+  <div style="flex-shrink:0;display:flex;align-items:center;gap:22px;padding:0 26px;height:62px;background:#F3F4EF;border-bottom:1px solid #E4E6DC;">
+    <div onClick="{{ goHome }}" style="display:flex;align-items:center;gap:9px;cursor:pointer;flex-shrink:0;">
+      <div style="width:28px;height:28px;border-radius:9px;background:#C8F04B;display:flex;align-items:center;justify-content:center;font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:16px;color:#131711;">P</div>
+      <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:18px;letter-spacing:-0.4px;">players<span style="color:#0E4632;">place</span></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:4px;">
+      <sc-for list="{{ navItems }}" as="ni" hint-placeholder-count="5">
+        <div onClick="{{ ni.onClick }}" style="font-size:13px;font-weight:700;padding:8px 14px;border-radius:99px;cursor:pointer;background:{{ ni.bg }};color:{{ ni.color }};" style-hover="opacity:.8;">{{ ni.label }}</div>
+      </sc-for>
+    </div>
+    <div style="flex:1;"></div>
+    <div style="display:flex;align-items:center;gap:10px;background:#fff;border:1px solid #E4E6DC;border-radius:11px;padding:9px 14px;width:230px;cursor:pointer;">
+      <svg width="14" height="14" viewBox="0 0 16 16"><circle cx="7" cy="7" r="5" fill="none" stroke="#9AA093" stroke-width="2"></circle><line x1="11" y1="11" x2="15" y2="15" stroke="#9AA093" stroke-width="2" stroke-linecap="round"></line></svg>
+      <div style="font-size:13px;color:#9AA093;">Buscar jogadores, clubes…</div>
+    </div>
+    <sc-if value="{{ showPro }}" hint-placeholder-val="{{ true }}">
+      <div style="background:#C8F04B;color:#131711;font-size:12.5px;font-weight:800;border-radius:10px;padding:9px 16px;cursor:pointer;flex-shrink:0;" style-hover="background:#D6F86B;">Assinar PRO</div>
+    </sc-if>
+  </div>
+
+  <!-- ══════════ CONTENT ══════════ -->
+  <div style="flex:1;overflow-y:auto;">
+  <div style="max-width:1140px;margin:0 auto;padding:26px 28px 70px;">
+
+    <!-- ─────── HOME ─────── -->
+    <sc-if value="{{ showHome }}" hint-placeholder-val="{{ true }}">
+    <div data-screen-label="Home" style="animation:ppIn .3s ease;">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;">
+        <div>
+          <div style="font-size:12px;font-weight:600;color:#70776B;">Sexta, 10 de julho · Janela aberta</div>
+          <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:30px;letter-spacing:-0.7px;margin-top:4px;">O mercado, em tempo real</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;margin-top:22px;align-items:start;">
+        <div style="display:flex;flex-direction:column;gap:22px;min-width:0;">
+
+          <div>
+            <div style="display:flex;align-items:center;gap:7px;margin-bottom:10px;">
+              <div style="width:7px;height:7px;border-radius:50%;background:#DE4A32;animation:ppPulse 1.4s infinite;"></div>
+              <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:17px;letter-spacing:-0.3px;">Ao vivo</div>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">
+              <sc-for list="{{ matches }}" as="m" hint-placeholder-count="4">
+                <div style="background:#fff;border:1px solid #E4E6DC;border-radius:16px;padding:12px 13px;min-width:0;">
+                  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;gap:6px;">
+                    <div style="font-size:9px;font-weight:700;letter-spacing:.6px;color:#9AA093;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ m.comp }}</div>
+                    <div style="display:flex;align-items:center;gap:4px;font-size:9px;font-weight:800;letter-spacing:.3px;padding:3px 7px;border-radius:99px;background:{{ m.statusBg }};color:{{ m.statusColor }};white-space:nowrap;">
+                      <span style="width:5px;height:5px;border-radius:50%;background:{{ m.dotColor }};display:{{ m.dotDisplay }};animation:ppPulse 1.4s infinite;"></span>{{ m.status }}
+                    </div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:7px;margin-bottom:6px;">
+                    <div style="width:20px;height:20px;border-radius:50%;background:{{ m.homeColor }};color:{{ m.homeText }};display:flex;align-items:center;justify-content:center;font-size:7.5px;font-weight:800;flex-shrink:0;">{{ m.home }}</div>
+                    <div style="flex:1;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ m.homeName }}</div>
+                    <div style="font-size:13px;font-weight:800;font-variant-numeric:tabular-nums;">{{ m.homeScore }}</div>
+                  </div>
+                  <div style="display:flex;align-items:center;gap:7px;">
+                    <div style="width:20px;height:20px;border-radius:50%;background:{{ m.awayColor }};color:{{ m.awayText }};display:flex;align-items:center;justify-content:center;font-size:7.5px;font-weight:800;flex-shrink:0;">{{ m.away }}</div>
+                    <div style="flex:1;font-size:12.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ m.awayName }}</div>
+                    <div style="font-size:13px;font-weight:800;font-variant-numeric:tabular-nums;">{{ m.awayScore }}</div>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div>
+            <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;">
+              <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:17px;letter-spacing:-0.3px;">Transferências de impacto</div>
+              <div onClick="{{ goTransfers }}" style="font-size:12.5px;font-weight:700;color:#0E4632;cursor:pointer;">Ver tudo →</div>
+            </div>
+            <div style="background:#fff;border:1px solid #E4E6DC;border-radius:16px;overflow:hidden;">
+              <sc-for list="{{ impact }}" as="t" hint-placeholder-count="3">
+                <div onClick="{{ t.open }}" style="display:flex;align-items:center;gap:14px;padding:13px 16px;border-bottom:{{ t.divider }};cursor:pointer;" style-hover="background:#FAFBF6;">
+                  <div style="width:38px;height:38px;border-radius:50%;background:#E9EBE0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#70776B;flex-shrink:0;">{{ t.initials }}</div>
+                  <div style="width:220px;font-size:14px;font-weight:700;">{{ t.name }}</div>
+                  <div style="flex:1;font-size:12.5px;color:#70776B;">{{ t.route }}</div>
+                  <div style="font-size:13.5px;font-weight:800;font-variant-numeric:tabular-nums;">{{ t.fee }}</div>
+                  <div style="font-size:9px;font-weight:800;letter-spacing:.6px;padding:3px 8px;border-radius:99px;background:{{ t.tagBg }};color:{{ t.tagColor }};">{{ t.tag }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div>
+            <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;">
+              <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:17px;letter-spacing:-0.3px;">Manchetes</div>
+            </div>
+            <div style="background:#fff;border:1px solid #E4E6DC;border-radius:16px;overflow:hidden;">
+              <sc-for list="{{ news }}" as="n" hint-placeholder-count="3">
+                <div style="padding:14px 16px;border-bottom:{{ n.divider }};cursor:pointer;" style-hover="background:#FAFBF6;">
+                  <div style="display:flex;gap:8px;align-items:center;">
+                    <div style="font-size:9px;font-weight:800;letter-spacing:.8px;color:#0E4632;">{{ n.cat }}</div>
+                    <div style="font-size:11px;color:#9AA093;">{{ n.time }}</div>
+                  </div>
+                  <div style="font-size:14.5px;font-weight:600;line-height:1.35;margin-top:5px;text-wrap:pretty;">{{ n.t }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+
+        <!-- sidebar -->
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div style="background:#fff;border:1px solid #E4E6DC;border-radius:16px;padding:15px 16px;">
+            <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;">
+              <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:14.5px;">Top valores</div>
+              <div onClick="{{ goValues }}" style="font-size:11.5px;font-weight:700;color:#0E4632;cursor:pointer;">Ranking →</div>
+            </div>
+            <div style="display:flex;flex-direction:column;">
+              <sc-for list="{{ top5 }}" as="p" hint-placeholder-count="5">
+                <div onClick="{{ p.open }}" style="display:flex;align-items:center;gap:9px;padding:8px 0;border-bottom:{{ p.divider }};cursor:pointer;" style-hover="opacity:.75;">
+                  <div style="width:16px;font-size:11px;font-weight:800;color:#9AA093;font-variant-numeric:tabular-nums;">{{ p.rank }}</div>
+                  <div style="flex:1;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ p.name }}</div>
+                  <div style="font-size:12.5px;font-weight:800;font-variant-numeric:tabular-nums;">{{ p.valueStr }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <div style="background:#0E4632;border-radius:16px;padding:16px;">
+            <div style="display:inline-block;font-size:9px;font-weight:800;letter-spacing:1px;background:#C8F04B;color:#131711;border-radius:99px;padding:3px 8px;">DEBATE DA SEMANA</div>
+            <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:15.5px;line-height:1.3;color:#fff;margin-top:9px;letter-spacing:-0.2px;text-wrap:pretty;">Vinícius Júnior a € 150 mi: o valor deve mudar?</div>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-top:11px;">
+              <sc-for list="{{ forumOpts }}" as="o" hint-placeholder-count="3">
+                <div onClick="{{ o.onClick }}" style="display:flex;align-items:center;gap:8px;background:{{ o.bgDark }};border:{{ o.borderDark }};border-radius:10px;padding:8px 10px;cursor:pointer;">
+                  <div style="font-size:11.5px;font-weight:700;color:#fff;width:72px;flex-shrink:0;">{{ o.label }}</div>
+                  <div style="flex:1;height:5px;border-radius:99px;background:rgba(255,255,255,.14);overflow:hidden;">
+                    <div style="height:100%;border-radius:99px;width:{{ o.barW }};background:#C8F04B;"></div>
+                  </div>
+                  <div style="font-size:11px;font-weight:800;color:#C8F04B;font-variant-numeric:tabular-nums;width:30px;text-align:right;">{{ o.pctStr }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div onClick="{{ goForum }}" style="font-size:11px;color:rgba(255,255,255,.6);margin-top:9px;cursor:pointer;">{{ forumTotal }} votos · <span style="color:#C8F04B;font-weight:700;">ir para o fórum →</span></div>
+          </div>
+
+          <sc-if value="{{ showAds }}" hint-placeholder-val="{{ true }}">
+          <div style="background:#fff;border:1px dashed #D5D8CB;border-radius:16px;padding:14px 16px;">
+            <div style="font-size:8.5px;font-weight:800;letter-spacing:1.2px;color:#9AA093;">PUBLICIDADE</div>
+            <div style="display:flex;align-items:center;gap:11px;margin-top:9px;">
+              <div style="width:38px;height:38px;border-radius:11px;background:#131711;color:#C8F04B;display:flex;align-items:center;justify-content:center;font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:14px;flex-shrink:0;">11</div>
+              <div style="font-size:12.5px;font-weight:600;line-height:1.35;">ProScout11 · Análise tática para treinadores</div>
+            </div>
+          </div>
+          </sc-if>
+
+          <sc-if value="{{ showPro }}" hint-placeholder-val="{{ true }}">
+          <div style="background:#131711;border-radius:16px;padding:16px;">
+            <div style="font-size:9.5px;font-weight:800;letter-spacing:1px;color:#C8F04B;">PLAYERSPLACE PRO</div>
+            <div style="font-size:13px;font-weight:600;color:#fff;margin-top:6px;line-height:1.4;">Filtros avançados, comparações e relatórios para clubes e agentes.</div>
+            <div style="margin-top:11px;display:inline-block;background:#C8F04B;color:#131711;font-size:12px;font-weight:800;border-radius:10px;padding:8px 14px;cursor:pointer;" style-hover="background:#D6F86B;">Testar 7 dias grátis</div>
+          </div>
+          </sc-if>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ─────── TRANSFERÊNCIAS ─────── -->
+    <sc-if value="{{ showTransfers }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="Transferências e Rumores" style="animation:ppIn .3s ease;">
+      <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:28px;letter-spacing:-0.7px;">Transferências</div>
+      <div style="font-size:13px;color:#70776B;margin-top:3px;">Central de rumores e negócios confirmados</div>
+      <div style="display:flex;background:#E7E9DF;border-radius:13px;padding:3px;gap:3px;margin-top:18px;width:340px;">
+        <div onClick="{{ tabRumores }}" style="flex:1;text-align:center;padding:9px 0;border-radius:11px;font-weight:700;font-size:13.5px;cursor:pointer;background:{{ rumTabBg }};color:{{ rumTabColor }};">Rumores</div>
+        <div onClick="{{ tabConfirmadas }}" style="flex:1;text-align:center;padding:9px 0;border-radius:11px;font-weight:700;font-size:13.5px;cursor:pointer;background:{{ confTabBg }};color:{{ confTabColor }};">Confirmadas</div>
+      </div>
+
+      <sc-if value="{{ showRumores }}" hint-placeholder-val="{{ true }}">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:16px;">
+        <sc-for list="{{ rumors }}" as="r" hint-placeholder-count="4">
+          <div style="background:#fff;border:1px solid #E4E6DC;border-radius:16px;padding:16px;">
+            <div style="display:flex;align-items:center;gap:11px;">
+              <div style="width:42px;height:42px;border-radius:50%;background:#E9EBE0;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800;color:#70776B;flex-shrink:0;">{{ r.initials }}</div>
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:15px;font-weight:700;">{{ r.name }}</div>
+                <div style="font-size:11.5px;color:#70776B;margin-top:1px;">{{ r.pos }} · {{ r.age }} anos</div>
+              </div>
+              <div style="text-align:right;">
+                <div style="font-size:14.5px;font-weight:800;font-variant-numeric:tabular-nums;">{{ r.fee }}</div>
+                <div style="font-size:10.5px;color:#9AA093;margin-top:1px;">taxa especulada</div>
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:12px;background:#F6F7F1;border-radius:11px;padding:9px 11px;">
+              <div style="width:19px;height:19px;border-radius:50%;background:{{ r.fromColor }};color:{{ r.fromText }};display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:800;">{{ r.from }}</div>
+              <div style="font-size:12px;font-weight:600;color:#4A5045;">{{ r.fromName }}</div>
+              <div style="color:#9AA093;font-size:13px;">→</div>
+              <div style="width:19px;height:19px;border-radius:50%;background:{{ r.toColor }};color:{{ r.toText }};display:flex;align-items:center;justify-content:center;font-size:7px;font-weight:800;">{{ r.to }}</div>
+              <div style="font-size:12px;font-weight:700;">{{ r.toName }}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;margin-top:12px;">
+              <div style="font-size:9px;font-weight:800;letter-spacing:.8px;color:#9AA093;">TEMPERATURA</div>
+              <div style="flex:1;height:5px;border-radius:99px;background:#EDEFE5;overflow:hidden;">
+                <div style="height:100%;border-radius:99px;width:{{ r.heatW }};background:{{ r.heatColor }};"></div>
+              </div>
+              <div style="font-size:12.5px;font-weight:800;color:{{ r.heatColor }};font-variant-numeric:tabular-nums;">{{ r.heatPct }}</div>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:9px;font-size:11px;color:#9AA093;">
+              <div>{{ r.sources }} fontes</div><div>·</div><div>{{ r.time }}</div>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ showConfirmadas }}" hint-placeholder-val="{{ false }}">
+      <div style="background:#fff;border:1px solid #E4E6DC;border-radius:16px;overflow:hidden;margin-top:16px;">
+        <sc-for list="{{ confirmed }}" as="c" hint-placeholder-count="5">
+          <div style="display:flex;align-items:center;gap:14px;padding:13px 16px;border-bottom:{{ c.divider }};">
+            <div style="width:38px;height:38px;border-radius:50%;background:#E9EBE0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#70776B;flex-shrink:0;">{{ c.initials }}</div>
+            <div style="width:240px;font-size:14px;font-weight:700;">{{ c.name }}</div>
+            <div style="flex:1;font-size:12.5px;color:#70776B;">{{ c.route }}</div>
+            <div style="font-size:13.5px;font-weight:800;font-variant-numeric:tabular-nums;">{{ c.fee }}</div>
+            <div style="width:50px;text-align:right;font-size:11.5px;color:#9AA093;">{{ c.date }}</div>
+          </div>
+        </sc-for>
+      </div>
+      </sc-if>
+    </div>
+    </sc-if>
+
+    <!-- ─────── VALORES ─────── -->
+    <sc-if value="{{ showValues }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="Valores de Mercado" style="animation:ppIn .3s ease;">
+      <div style="display:flex;align-items:flex-end;justify-content:space-between;">
+        <div>
+          <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:28px;letter-spacing:-0.7px;">Valores de Mercado</div>
+          <div style="font-size:13px;color:#70776B;margin-top:3px;">Ranking global · atualizado pela comunidade</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;padding:9px 15px;border-radius:99px;background:#fff;border:1px solid #E4E6DC;color:#70776B;cursor:pointer;">Filtros avançados<span style="font-size:8.5px;font-weight:800;letter-spacing:.5px;background:#C8F04B;color:#131711;border-radius:99px;padding:2px 6px;">PRO</span></div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:16px;">
+        <sc-for list="{{ valueChips }}" as="ch" hint-placeholder-count="4">
+          <div onClick="{{ ch.onClick }}" style="font-size:12.5px;font-weight:700;padding:8px 15px;border-radius:99px;cursor:pointer;background:{{ ch.bg }};color:{{ ch.color }};border:{{ ch.border }};">{{ ch.label }}</div>
+        </sc-for>
+      </div>
+      <div style="margin-top:14px;background:#fff;border:1px solid #E4E6DC;border-radius:16px;overflow:hidden;">
+        <div style="display:grid;grid-template-columns:44px minmax(0,1fr) 200px 150px 60px 110px 110px;gap:10px;align-items:center;padding:10px 18px;border-bottom:1px solid #E4E6DC;background:#FAFBF6;font-size:10px;font-weight:800;letter-spacing:.8px;color:#9AA093;">
+          <div>#</div><div>JOGADOR</div><div>CLUBE</div><div>POSIÇÃO</div><div>IDADE</div><div style="text-align:right;">VALOR</div><div style="text-align:right;">VARIAÇÃO</div>
+        </div>
+        <sc-for list="{{ valuePlayers }}" as="p" hint-placeholder-count="10">
+          <div onClick="{{ p.open }}" style="display:grid;grid-template-columns:44px minmax(0,1fr) 200px 150px 60px 110px 110px;gap:10px;align-items:center;padding:11px 18px;border-bottom:{{ p.divider }};cursor:pointer;" style-hover="background:#FAFBF6;">
+            <div style="font-size:12.5px;font-weight:800;color:#9AA093;font-variant-numeric:tabular-nums;">{{ p.rank }}</div>
+            <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+              <div style="width:32px;height:32px;border-radius:50%;background:#E9EBE0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#70776B;flex-shrink:0;">{{ p.initials }}</div>
+              <div style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ p.name }}</div>
+            </div>
+            <div onClick="{{ p.clubOpen }}" style="display:flex;align-items:center;gap:6px;cursor:pointer;" style-hover="opacity:.7;">
+              <div style="width:14px;height:14px;border-radius:50%;background:{{ p.clubColor }};flex-shrink:0;"></div>
+              <div style="font-size:12.5px;font-weight:600;color:#4A5045;">{{ p.clubName }}</div>
+            </div>
+            <div style="font-size:12.5px;color:#70776B;">{{ p.pos }}</div>
+            <div style="font-size:12.5px;color:#70776B;font-variant-numeric:tabular-nums;">{{ p.age }}</div>
+            <div style="text-align:right;font-size:14px;font-weight:800;font-variant-numeric:tabular-nums;">{{ p.valueStr }}</div>
+            <div style="text-align:right;font-size:12px;font-weight:700;color:{{ p.deltaColor }};"><span style="font-size:8px;">{{ p.arrow }}</span> {{ p.deltaStr }}</div>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ─────── COMPETIÇÕES ─────── -->
+    <sc-if value="{{ showCompetitions }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="Competições" style="animation:ppIn .3s ease;">
+      <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:28px;letter-spacing:-0.7px;">Competições</div>
+      <div style="font-size:13px;color:#70776B;margin-top:3px;">Ligas e torneios cobertos pela plataforma</div>
+      <div style="display:flex;gap:8px;margin-top:16px;">
+        <sc-for list="{{ compChips }}" as="ch" hint-placeholder-count="3">
+          <div onClick="{{ ch.onClick }}" style="font-size:12.5px;font-weight:700;padding:8px 15px;border-radius:99px;cursor:pointer;background:{{ ch.bg }};color:{{ ch.color }};border:{{ ch.border }};">{{ ch.label }}</div>
+        </sc-for>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:14px;">
+        <sc-for list="{{ comps }}" as="c" hint-placeholder-count="8">
+          <div onClick="{{ c.open }}" style="display:flex;align-items:center;gap:13px;background:#fff;border:1px solid #E4E6DC;border-radius:16px;padding:14px 16px;cursor:pointer;" style-hover="background:#FAFBF6;">
+            <div style="width:42px;height:42px;border-radius:13px;background:{{ c.color }};display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:#fff;flex-shrink:0;">{{ c.ab }}</div>
+            <div style="flex:1;min-width:0;">
+              <div style="font-size:14.5px;font-weight:700;">{{ c.name }}</div>
+              <div style="font-size:11.5px;color:#70776B;margin-top:2px;">{{ c.region }} · {{ c.clubs }} clubes</div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:13.5px;font-weight:800;font-variant-numeric:tabular-nums;">{{ c.value }}</div>
+              <div style="font-size:10px;color:#9AA093;margin-top:1px;">valor total</div>
+            </div>
+            <svg width="7" height="12" viewBox="0 0 7 12"><path d="M1 1l5 5-5 5" stroke="#C4C8B9" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ─────── DETALHES DA COMPETIÇÃO ─────── -->
+    <sc-if value="{{ showComp }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="Detalhes da Competição" style="animation:ppIn .3s ease;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div onClick="{{ goBack }}" style="width:36px;height:36px;border-radius:50%;background:#fff;border:1px solid #E4E6DC;display:flex;align-items:center;justify-content:center;cursor:pointer;" style-hover="background:#EDEFE5;">
+          <svg width="8" height="14" viewBox="0 0 8 14"><path d="M7 1L1 7l6 6" stroke="#131711" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        </div>
+        <div style="font-size:12px;font-weight:700;color:#70776B;letter-spacing:.3px;">DETALHES DA COMPETIÇÃO</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;margin-top:18px;">
+        <div style="width:64px;height:64px;border-radius:18px;background:{{ compColor }};display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;color:#fff;flex-shrink:0;">{{ compAb }}</div>
+        <div>
+          <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:27px;letter-spacing:-0.6px;">{{ compName }}</div>
+          <div style="font-size:13px;color:#70776B;margin-top:4px;">{{ compRegion }} · Temporada 2025/26</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:18px;max-width:560px;">
+        <div style="background:#fff;border:1px solid #E4E6DC;border-radius:14px;padding:14px;text-align:center;">
+          <div style="font-size:18px;font-weight:800;font-variant-numeric:tabular-nums;">{{ compValue }}</div>
+          <div style="font-size:10px;font-weight:700;color:#9AA093;margin-top:3px;">VALOR TOTAL</div>
+        </div>
+        <div style="background:#fff;border:1px solid #E4E6DC;border-radius:14px;padding:14px;text-align:center;">
+          <div style="font-size:18px;font-weight:800;font-variant-numeric:tabular-nums;">{{ compClubsCount }}</div>
+          <div style="font-size:10px;font-weight:700;color:#9AA093;margin-top:3px;">CLUBES</div>
+        </div>
+        <div style="background:#fff;border:1px solid #E4E6DC;border-radius:14px;padding:14px;text-align:center;">
+          <div style="font-size:18px;font-weight:800;font-variant-numeric:tabular-nums;">{{ compPlayers }}</div>
+          <div style="font-size:10px;font-weight:700;color:#9AA093;margin-top:3px;">JOGADORES</div>
+        </div>
+      </div>
+      <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:17px;letter-spacing:-0.3px;margin:24px 0 10px;">Clubes mais valiosos</div>
+      <div style="background:#fff;border:1px solid #E4E6DC;border-radius:16px;overflow:hidden;">
+        <sc-for list="{{ compClubs }}" as="cc" hint-placeholder-count="5">
+          <div onClick="{{ cc.open }}" style="display:flex;align-items:center;gap:13px;padding:13px 18px;border-bottom:{{ cc.divider }};cursor:pointer;" style-hover="background:#FAFBF6;">
+            <div style="width:22px;font-size:12.5px;font-weight:800;color:#9AA093;font-variant-numeric:tabular-nums;text-align:center;">{{ cc.rank }}</div>
+            <div style="width:36px;height:36px;border-radius:50%;background:{{ cc.color }};color:{{ cc.text }};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:800;flex-shrink:0;">{{ cc.ab }}</div>
+            <div style="flex:1;font-size:14.5px;font-weight:700;">{{ cc.name }}</div>
+            <div style="font-size:14px;font-weight:800;font-variant-numeric:tabular-nums;">{{ cc.valueStr }}</div>
+            <svg width="7" height="12" viewBox="0 0 7 12" style="visibility:{{ cc.chev }};"><path d="M1 1l5 5-5 5" stroke="#C4C8B9" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          </div>
+        </sc-for>
+      </div>
+      <div style="font-size:11px;color:#9AA093;margin-top:8px;">Valores agregados definidos pela comunidade</div>
+    </div>
+    </sc-if>
+
+    <!-- ─────── PERFIL DO CLUBE ─────── -->
+    <sc-if value="{{ showClub }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="Perfil do Clube" style="animation:ppIn .3s ease;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div onClick="{{ goBack }}" style="width:36px;height:36px;border-radius:50%;background:#fff;border:1px solid #E4E6DC;display:flex;align-items:center;justify-content:center;cursor:pointer;" style-hover="background:#EDEFE5;">
+          <svg width="8" height="14" viewBox="0 0 8 14"><path d="M7 1L1 7l6 6" stroke="#131711" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        </div>
+        <div style="font-size:12px;font-weight:700;color:#70776B;letter-spacing:.3px;">PERFIL DO CLUBE</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:16px;margin-top:18px;">
+        <div style="width:68px;height:68px;border-radius:50%;background:{{ clubColor2 }};color:{{ clubText2 }};display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:800;flex-shrink:0;border:2px solid #fff;box-shadow:0 0 0 1.5px #E4E6DC;">{{ clubAb }}</div>
+        <div>
+          <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:27px;letter-spacing:-0.6px;">{{ clubName2 }}</div>
+          <div onClick="{{ clubLeagueOpen }}" style="font-size:13px;font-weight:700;color:#0E4632;margin-top:5px;cursor:pointer;" style-hover="opacity:.75;">{{ clubLeagueName }} · {{ clubCountry }}</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;margin-top:20px;align-items:start;">
+        <div>
+          <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:17px;letter-spacing:-0.3px;margin-bottom:10px;">Destaques do elenco</div>
+          <div style="background:#fff;border:1px solid #E4E6DC;border-radius:16px;overflow:hidden;">
+            <sc-for list="{{ squad }}" as="sq" hint-placeholder-count="4">
+              <div onClick="{{ sq.open }}" style="display:flex;align-items:center;gap:13px;padding:12px 16px;border-bottom:{{ sq.divider }};cursor:pointer;" style-hover="background:#FAFBF6;">
+                <div style="width:38px;height:38px;border-radius:50%;background:#E9EBE0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#70776B;flex-shrink:0;">{{ sq.initials }}</div>
+                <div style="flex:1;min-width:0;">
+                  <div style="font-size:14px;font-weight:700;">{{ sq.name }}</div>
+                  <div style="font-size:11.5px;color:#70776B;margin-top:2px;">{{ sq.sub }}</div>
+                </div>
+                <div style="font-size:13.5px;font-weight:800;font-variant-numeric:tabular-nums;">{{ sq.valueStr }}</div>
+              </div>
+            </sc-for>
+          </div>
+          <div style="font-size:11px;color:#9AA093;margin-top:8px;">Valores individuais definidos pela comunidade</div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:12px;">
+          <div style="background:#0E4632;border-radius:16px;padding:17px;">
+            <div style="font-size:10px;font-weight:800;letter-spacing:1.2px;color:#C8F04B;">VALOR DO ELENCO</div>
+            <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:31px;color:#fff;letter-spacing:-1px;margin-top:6px;font-variant-numeric:tabular-nums;">{{ clubValueStr }}</div>
+            <div style="font-size:11px;color:rgba(255,255,255,.65);margin-top:5px;">definido pela comunidade · atualizado hoje</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">
+            <div style="background:#fff;border:1px solid #E4E6DC;border-radius:14px;padding:12px 6px;text-align:center;">
+              <div style="font-size:16px;font-weight:800;font-variant-numeric:tabular-nums;">{{ clubSquadN }}</div>
+              <div style="font-size:9px;font-weight:700;color:#9AA093;margin-top:3px;">JOGADORES</div>
+            </div>
+            <div style="background:#fff;border:1px solid #E4E6DC;border-radius:14px;padding:12px 6px;text-align:center;">
+              <div style="font-size:16px;font-weight:800;font-variant-numeric:tabular-nums;">{{ clubAvg }}</div>
+              <div style="font-size:9px;font-weight:700;color:#9AA093;margin-top:3px;">IDADE MÉDIA</div>
+            </div>
+            <div style="background:#fff;border:1px solid #E4E6DC;border-radius:14px;padding:12px 6px;text-align:center;">
+              <div style="font-size:16px;font-weight:800;font-variant-numeric:tabular-nums;">{{ clubForg }}</div>
+              <div style="font-size:9px;font-weight:700;color:#9AA093;margin-top:3px;">ESTRANGEIROS</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ─────── FÓRUM ─────── -->
+    <sc-if value="{{ showForum }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="Fórum" style="animation:ppIn .3s ease;">
+      <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:28px;letter-spacing:-0.7px;">Fórum</div>
+      <div style="font-size:13px;color:#70776B;margin-top:3px;">Onde a comunidade define os valores</div>
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:20px;margin-top:18px;align-items:start;">
+        <div>
+          <div style="display:flex;gap:8px;margin-bottom:12px;">
+            <sc-for list="{{ forumChips }}" as="ch" hint-placeholder-count="4">
+              <div onClick="{{ ch.onClick }}" style="font-size:12.5px;font-weight:700;padding:8px 15px;border-radius:99px;cursor:pointer;background:{{ ch.bg }};color:{{ ch.color }};border:{{ ch.border }};">{{ ch.label }}</div>
+            </sc-for>
+          </div>
+          <div style="background:#fff;border:1px solid #E4E6DC;border-radius:16px;overflow:hidden;">
+            <sc-for list="{{ threads }}" as="th" hint-placeholder-count="5">
+              <div style="padding:14px 16px;border-bottom:{{ th.divider }};cursor:pointer;" style-hover="background:#FAFBF6;">
+                <div style="display:flex;gap:8px;align-items:center;">
+                  <div style="font-size:9px;font-weight:800;letter-spacing:.8px;color:#0E4632;">{{ th.catLabel }}</div>
+                  <div style="font-size:9px;font-weight:800;letter-spacing:.6px;color:#DE4A32;display:{{ th.hotDisplay }};">EM ALTA</div>
+                </div>
+                <div style="font-size:14.5px;font-weight:600;line-height:1.35;margin-top:5px;text-wrap:pretty;">{{ th.t }}</div>
+                <div style="display:flex;gap:10px;margin-top:7px;font-size:11px;color:#9AA093;">
+                  <div>{{ th.replies }} respostas</div><div>·</div><div>{{ th.time }}</div>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div style="background:#0E4632;border-radius:16px;padding:16px;">
+            <div style="display:inline-block;font-size:9px;font-weight:800;letter-spacing:1px;background:#C8F04B;color:#131711;border-radius:99px;padding:3px 8px;">DEBATE DA SEMANA</div>
+            <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:15.5px;line-height:1.3;color:#fff;margin-top:9px;letter-spacing:-0.2px;text-wrap:pretty;">Vinícius Júnior a € 150 mi: o valor deve mudar?</div>
+            <div style="display:flex;flex-direction:column;gap:6px;margin-top:11px;">
+              <sc-for list="{{ forumOpts }}" as="o" hint-placeholder-count="3">
+                <div onClick="{{ o.onClick }}" style="display:flex;align-items:center;gap:8px;background:{{ o.bgDark }};border:{{ o.borderDark }};border-radius:10px;padding:8px 10px;cursor:pointer;">
+                  <div style="font-size:11.5px;font-weight:700;color:#fff;width:72px;flex-shrink:0;">{{ o.label }}</div>
+                  <div style="flex:1;height:5px;border-radius:99px;background:rgba(255,255,255,.14);overflow:hidden;">
+                    <div style="height:100%;border-radius:99px;width:{{ o.barW }};background:#C8F04B;"></div>
+                  </div>
+                  <div style="font-size:11px;font-weight:800;color:#C8F04B;font-variant-numeric:tabular-nums;width:30px;text-align:right;">{{ o.pctStr }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="font-size:11px;color:rgba(255,255,255,.6);margin-top:9px;">{{ forumTotal }} votos · encerra em 2 dias · <span style="color:#C8F04B;font-weight:700;">{{ forumHint }}</span></div>
+          </div>
+          <div style="background:#fff;border:1px solid #E4E6DC;border-radius:16px;padding:15px 16px;">
+            <div style="font-size:10px;font-weight:800;letter-spacing:1px;color:#0E4632;">CENTRAL DA COMUNIDADE</div>
+            <div style="font-size:13px;font-weight:600;margin-top:5px;line-height:1.4;">48,2 mil contribuidores ativos mantêm os dados atualizados</div>
+            <div style="margin-top:11px;display:inline-block;background:#131711;color:#fff;font-size:12px;font-weight:800;border-radius:10px;padding:8px 14px;cursor:pointer;">Contribuir</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+    <!-- ─────── PERFIL DE JOGADOR ─────── -->
+    <sc-if value="{{ showPlayer }}" hint-placeholder-val="{{ false }}">
+    <div data-screen-label="Perfil de Jogador" style="animation:ppIn .3s ease;">
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div onClick="{{ goBack }}" style="width:36px;height:36px;border-radius:50%;background:#fff;border:1px solid #E4E6DC;display:flex;align-items:center;justify-content:center;cursor:pointer;" style-hover="background:#EDEFE5;">
+          <svg width="8" height="14" viewBox="0 0 8 14"><path d="M7 1L1 7l6 6" stroke="#131711" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        </div>
+        <div style="font-size:12px;font-weight:700;color:#70776B;letter-spacing:.3px;">PERFIL DO JOGADOR</div>
+      </div>
+      <div style="display:grid;grid-template-columns:minmax(0,1fr) 380px;gap:20px;margin-top:18px;align-items:start;">
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div style="background:#fff;border:1px solid #E4E6DC;border-radius:16px;padding:20px;">
+            <div style="display:flex;align-items:center;gap:16px;">
+              <div style="width:80px;height:80px;border-radius:50%;background:#E9EBE0;border:2px solid #fff;box-shadow:0 0 0 1.5px #E4E6DC;display:flex;align-items:center;justify-content:center;font-family:'Bricolage Grotesque',sans-serif;font-size:24px;font-weight:800;color:#70776B;flex-shrink:0;">{{ pInitials }}</div>
+              <div style="flex:1;min-width:0;">
+                <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:26px;letter-spacing:-0.6px;line-height:1.1;">{{ pName }}</div>
+                <div onClick="{{ pClubOpen }}" style="display:flex;align-items:center;gap:6px;margin-top:7px;cursor:pointer;" style-hover="opacity:.75;">
+                  <div style="width:15px;height:15px;border-radius:50%;background:{{ pClubColor }};"></div>
+                  <div style="font-size:13px;font-weight:700;">{{ pClubName }}</div>
+                </div>
+                <div style="font-size:12px;color:#70776B;margin-top:4px;">{{ pPos }} · {{ pAge }} anos · {{ pNat }}</div>
+              </div>
+              <div onClick="{{ toggleFollow }}" style="text-align:center;font-size:13px;font-weight:800;border-radius:11px;padding:11px 20px;cursor:pointer;background:{{ followBg }};color:{{ followColor }};border:{{ followBorder }};flex-shrink:0;">{{ followLabel }}</div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;margin-top:18px;">
+              <div style="background:#F6F7F1;border-radius:13px;padding:12px 6px;text-align:center;">
+                <div style="font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;">{{ pStatJ }}</div>
+                <div style="font-size:9.5px;font-weight:700;color:#9AA093;margin-top:3px;">JOGOS</div>
+              </div>
+              <div style="background:#F6F7F1;border-radius:13px;padding:12px 6px;text-align:center;">
+                <div style="font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;">{{ pStatG }}</div>
+                <div style="font-size:9.5px;font-weight:700;color:#9AA093;margin-top:3px;">GOLS</div>
+              </div>
+              <div style="background:#F6F7F1;border-radius:13px;padding:12px 6px;text-align:center;">
+                <div style="font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;">{{ pStatA }}</div>
+                <div style="font-size:9.5px;font-weight:700;color:#9AA093;margin-top:3px;">ASSIST.</div>
+              </div>
+              <div style="background:#F6F7F1;border-radius:13px;padding:12px 6px;text-align:center;">
+                <div style="font-size:19px;font-weight:800;font-variant-numeric:tabular-nums;">{{ pStatM }}</div>
+                <div style="font-size:9.5px;font-weight:700;color:#9AA093;margin-top:3px;">MINUTOS</div>
+              </div>
+            </div>
+            <div style="font-size:10.5px;color:#9AA093;margin-top:8px;text-align:center;">Temporada 2025/26 · todas as competições · contrato até {{ pContract }}</div>
+          </div>
+
+          <div>
+            <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:16px;letter-spacing:-0.3px;margin-bottom:10px;">Histórico de transferências</div>
+            <div style="background:#fff;border:1px solid #E4E6DC;border-radius:16px;overflow:hidden;">
+              <sc-for list="{{ pTransfers }}" as="tr" hint-placeholder-count="2">
+                <div style="display:flex;align-items:center;gap:14px;padding:13px 16px;border-bottom:{{ tr.divider }};">
+                  <div style="font-size:12px;font-weight:800;color:#9AA093;font-variant-numeric:tabular-nums;flex-shrink:0;">{{ tr.y }}</div>
+                  <div style="flex:1;font-size:13.5px;font-weight:600;">{{ tr.route }}</div>
+                  <div style="font-size:13.5px;font-weight:800;font-variant-numeric:tabular-nums;">{{ tr.fee }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+
+          <sc-if value="{{ showPro }}" hint-placeholder-val="{{ true }}">
+          <div style="background:#131711;border-radius:16px;padding:15px 16px;display:flex;align-items:center;gap:12px;">
+            <div style="flex:1;">
+              <div style="font-size:10px;font-weight:800;letter-spacing:1px;color:#C8F04B;">RECURSO PRO</div>
+              <div style="font-size:13.5px;font-weight:600;color:#fff;margin-top:4px;">Comparar {{ pFirstName }} com outro jogador</div>
+            </div>
+            <div style="background:#C8F04B;color:#131711;font-size:12px;font-weight:800;border-radius:10px;padding:9px 14px;cursor:pointer;flex-shrink:0;">Comparar</div>
+          </div>
+          </sc-if>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:14px;">
+          <div style="background:#0E4632;border-radius:18px;padding:18px;">
+            <div style="display:flex;align-items:baseline;justify-content:space-between;">
+              <div style="font-size:10px;font-weight:800;letter-spacing:1.2px;color:#C8F04B;">VALOR DE MERCADO</div>
+              <div style="font-size:10.5px;font-weight:700;color:rgba(255,255,255,.65);">{{ pDeltaLong }}</div>
+            </div>
+            <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:36px;color:#fff;letter-spacing:-1px;margin-top:6px;font-variant-numeric:tabular-nums;">{{ pValueStr }}</div>
+            <svg width="100%" height="70" viewBox="0 0 330 70" preserveAspectRatio="none" style="margin-top:10px;display:block;">
+              <polygon points="{{ sparkArea }}" fill="rgba(200,240,75,0.14)"></polygon>
+              <polyline points="{{ sparkPoints }}" fill="none" stroke="#C8F04B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"></polyline>
+              <circle cx="{{ sparkLastX }}" cy="{{ sparkLastY }}" r="4" fill="#C8F04B"></circle>
+            </svg>
+            <div style="display:flex;justify-content:space-between;font-size:10px;color:rgba(255,255,255,.5);margin-top:6px;font-variant-numeric:tabular-nums;">
+              <div>2022</div><div>2023</div><div>2024</div><div>2025</div><div>hoje</div>
+            </div>
+          </div>
+          <div style="background:#fff;border:1px solid #E4E6DC;border-radius:16px;padding:15px 16px;">
+            <div style="font-size:10px;font-weight:800;letter-spacing:1px;color:#0E4632;">A COMUNIDADE AVALIA</div>
+            <div style="font-size:14px;font-weight:700;margin-top:6px;">{{ pVoteQuestion }}</div>
+            <div style="display:flex;gap:7px;margin-top:12px;">
+              <sc-for list="{{ playerOpts }}" as="o" hint-placeholder-count="3">
+                <div onClick="{{ o.onClick }}" style="flex:1;text-align:center;border-radius:12px;padding:10px 0 9px;cursor:pointer;background:{{ o.bg }};border:{{ o.border }};">
+                  <div style="font-size:12px;font-weight:700;">{{ o.label }}</div>
+                  <div style="font-size:15px;font-weight:800;margin-top:3px;color:#0E4632;font-variant-numeric:tabular-nums;">{{ o.pctStr }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="font-size:11px;color:#9AA093;margin-top:10px;">{{ pVoteTotal }} avaliações da comunidade</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </sc-if>
+
+  </div>
+
+  <!-- footer -->
+  <div style="border-top:1px solid #E4E6DC;background:#fff;">
+    <div style="max-width:1140px;margin:0 auto;padding:18px 28px;display:flex;align-items:center;gap:20px;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <div style="width:20px;height:20px;border-radius:6px;background:#C8F04B;display:flex;align-items:center;justify-content:center;font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:11px;color:#131711;">P</div>
+        <div style="font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:13px;">players<span style="color:#0E4632;">place</span></div>
+      </div>
+      <div style="font-size:11.5px;color:#9AA093;">© 2026 · dados mantidos pela comunidade</div>
+      <div style="flex:1;"></div>
+      <div style="display:flex;gap:18px;font-size:12px;font-weight:600;color:#70776B;">
+        <div style="cursor:pointer;">Sobre</div><div style="cursor:pointer;">Comunidade</div><div style="cursor:pointer;">PRO</div><div style="cursor:pointer;">API</div>
+      </div>
+    </div>
+  </div>
+  </div>
+
+</div>
+</x-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;defaultScreen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;home&quot;,&quot;transfers&quot;,&quot;values&quot;,&quot;competitions&quot;,&quot;forum&quot;,&quot;player&quot;,&quot;comp&quot;,&quot;club&quot;],&quot;default&quot;:&quot;home&quot;,&quot;tsType&quot;:&quot;string&quot;,&quot;section&quot;:&quot;Navegação&quot;},&quot;showAds&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Monetização&quot;},&quot;showPro&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Monetização&quot;}}">
+const CLUBS = {
+  FCB:{n:'Barcelona', c:'#A50044'}, RMA:{n:'Real Madrid', c:'#22418B'},
+  MCI:{n:'Man City', c:'#5FA8D3'}, ARS:{n:'Arsenal', c:'#DB0007'},
+  LIV:{n:'Liverpool', c:'#C8102E'}, CHE:{n:'Chelsea', c:'#034694'},
+  BVB:{n:'Dortmund', c:'#E6C400', t:'#111'}, BAY:{n:'Bayern', c:'#DC052D'},
+  JUV:{n:'Juventus', c:'#17181A'}, MUN:{n:'Man United', c:'#DA291C'},
+  GAL:{n:'Galatasaray', c:'#A32638'}, MIL:{n:'Milan', c:'#FB090B'},
+  ATH:{n:'Athletic', c:'#EE2523'}, FLA:{n:'Flamengo', c:'#C52613'},
+  PAL:{n:'Palmeiras', c:'#006437'}, AVL:{n:'Aston Villa', c:'#670E36'},
+  NEW:{n:'Newcastle', c:'#241F20'}, LEV:{n:'Leverkusen', c:'#E32221'},
+  ATM:{n:'Atlético de Madrid', c:'#CB3524'}, PSG:{n:'PSG', c:'#004170'}, INT:{n:'Inter de Milão', c:'#0068A8'},
+};
+
+const PLAYERS = [
+  {id:1, name:'Lamine Yamal', club:'FCB', pos:'Ponta Direita', age:19, nat:'Espanha', value:200, delta:20, history:[90,120,150,180,200], stats:{j:41,g:18,a:22,m:'3.4k'}, contract:'jun 2031', transfers:[{y:'2023', route:'La Masia → Barcelona', fee:'Promovido'}]},
+  {id:2, name:'Kylian Mbappé', club:'RMA', pos:'Centroavante', age:27, nat:'França', value:180, delta:0, history:[180,180,180,170,180], stats:{j:44,g:39,a:8,m:'3.8k'}, contract:'jun 2029', transfers:[{y:'2024', route:'PSG → Real Madrid', fee:'Livre'},{y:'2018', route:'Monaco → PSG', fee:'€ 180 mi'}]},
+  {id:3, name:'Erling Haaland', club:'MCI', pos:'Centroavante', age:25, nat:'Noruega', value:175, delta:-5, history:[200,190,180,180,175], stats:{j:40,g:34,a:5,m:'3.5k'}, contract:'jun 2034', transfers:[{y:'2022', route:'Dortmund → Man City', fee:'€ 60 mi'},{y:'2020', route:'Salzburg → Dortmund', fee:'€ 20 mi'}]},
+  {id:4, name:'Jude Bellingham', club:'RMA', pos:'Meia-atacante', age:23, nat:'Inglaterra', value:170, delta:10, history:[150,160,180,170,170], stats:{j:42,g:14,a:11,m:'3.6k'}, contract:'jun 2029', transfers:[{y:'2023', route:'Dortmund → Real Madrid', fee:'€ 103 mi'}]},
+  {id:5, name:'Vinícius Júnior', club:'RMA', pos:'Ponta Esquerda', age:26, nat:'Brasil', value:150, delta:-10, history:[200,180,160,150,150], stats:{j:39,g:16,a:13,m:'3.2k'}, contract:'jun 2027', transfers:[{y:'2018', route:'Flamengo → Real Madrid', fee:'€ 45 mi'}]},
+  {id:6, name:'Florian Wirtz', club:'LIV', pos:'Meia-atacante', age:23, nat:'Alemanha', value:140, delta:15, history:[85,100,110,130,140], stats:{j:43,g:12,a:19,m:'3.5k'}, contract:'jun 2031', transfers:[{y:'2026', route:'Leverkusen → Liverpool', fee:'€ 125 mi'}]},
+  {id:7, name:'Pedri', club:'FCB', pos:'Meio-campista', age:23, nat:'Espanha', value:130, delta:10, history:[90,100,110,120,130], stats:{j:45,g:6,a:10,m:'3.9k'}, contract:'jun 2030', transfers:[{y:'2020', route:'Las Palmas → Barcelona', fee:'€ 5 mi'}]},
+  {id:8, name:'Bukayo Saka', club:'ARS', pos:'Ponta Direita', age:24, nat:'Inglaterra', value:125, delta:0, history:[110,120,130,120,125], stats:{j:38,g:13,a:14,m:'3.1k'}, contract:'jun 2028', transfers:[{y:'2018', route:'Base → Arsenal', fee:'Promovido'}]},
+  {id:9, name:'Cole Palmer', club:'CHE', pos:'Meia-atacante', age:24, nat:'Inglaterra', value:120, delta:-5, history:[80,110,130,125,120], stats:{j:40,g:19,a:12,m:'3.4k'}, contract:'jun 2033', transfers:[{y:'2023', route:'Man City → Chelsea', fee:'€ 47 mi'}]},
+  {id:10, name:'Endrick', club:'RMA', pos:'Centroavante', age:20, nat:'Brasil', value:85, delta:25, history:[35,60,60,75,85], stats:{j:28,g:11,a:3,m:'1.4k'}, contract:'jun 2030', transfers:[{y:'2024', route:'Palmeiras → Real Madrid', fee:'€ 47,5 mi'}]},
+];
+
+const MATCHES = [
+  {comp:'PREMIER LEAGUE', home:'CHE', away:'ARS', hs:'1', as:'2', status:"78'", live:true},
+  {comp:'BRASILEIRÃO', home:'FLA', away:'PAL', hs:'2', as:'0', status:"63'", live:true},
+  {comp:'BUNDESLIGA', home:'BAY', away:'BVB', hs:'3', as:'1', status:'FIM', live:false},
+  {comp:'LA LIGA', home:'RMA', away:'FCB', hs:'–', as:'–', status:'16:00', live:false},
+];
+
+const RUMORS = [
+  {name:'Rodrygo', pos:'Ponta Direita', age:25, from:'RMA', to:'MCI', fee:'€ 90 mi', heat:78, sources:12, time:'há 2 h'},
+  {name:'Victor Osimhen', pos:'Centroavante', age:27, from:'GAL', to:'MUN', fee:'€ 75 mi', heat:64, sources:8, time:'há 4 h'},
+  {name:'Karim Adeyemi', pos:'Ponta Esquerda', age:24, from:'BVB', to:'JUV', fee:'€ 48 mi', heat:51, sources:5, time:'há 7 h'},
+  {name:'Alphonso Davies', pos:'Lateral Esquerdo', age:25, from:'BAY', to:'CHE', fee:'€ 55 mi', heat:33, sources:3, time:'há 9 h'},
+];
+
+const CONFIRMED = [
+  {name:'Florian Wirtz', route:'Leverkusen → Liverpool', fee:'€ 125 mi', date:'8 jul', pid:6},
+  {name:'Nico Williams', route:'Athletic → Arsenal', fee:'€ 95 mi', date:'7 jul'},
+  {name:'Dušan Vlahović', route:'Juventus → Milan', fee:'Livre', date:'5 jul'},
+  {name:'João Pedro', route:'Brighton → Chelsea', fee:'€ 63 mi', date:'3 jul'},
+  {name:'Claudio Echeverri', route:'Man City → Roma', fee:'Empréstimo', date:'1 jul'},
+];
+
+const NEWS = [
+  {cat:'MERCADO', t:'Janela europeia abre com € 2,1 bi movimentados na primeira semana', time:'há 40 min'},
+  {cat:'BRASILEIRÃO', t:'Flamengo tem o elenco mais valioso da América do Sul: € 312 mi', time:'há 2 h'},
+  {cat:'DADOS', t:'Os 50 jovens mais valiosos de 2026 — Yamal lidera a nova geração', time:'há 5 h'},
+];
+
+const COMPS = [
+  {ab:'UCL', name:'Champions League', region:'Europa', zone:'Europa', clubs:36, value:'€ 11,2 bi', color:'#0A1E5C'},
+  {ab:'PL', name:'Premier League', region:'Inglaterra', zone:'Europa', clubs:20, value:'€ 12,4 bi', color:'#3D195B'},
+  {ab:'LL', name:'La Liga', region:'Espanha', zone:'Europa', clubs:20, value:'€ 9,8 bi', color:'#FF4B44'},
+  {ab:'BL', name:'Bundesliga', region:'Alemanha', zone:'Europa', clubs:18, value:'€ 7,2 bi', color:'#D3010C'},
+  {ab:'SA', name:'Serie A', region:'Itália', zone:'Europa', clubs:20, value:'€ 6,9 bi', color:'#024494'},
+  {ab:'L1', name:'Ligue 1', region:'França', zone:'Europa', clubs:18, value:'€ 5,1 bi', color:'#0C1C3C'},
+  {ab:'BR1', name:'Brasileirão Série A', region:'Brasil', zone:'América do Sul', clubs:20, value:'€ 1,9 bi', color:'#159C4B'},
+  {ab:'LIB', name:'Libertadores', region:'CONMEBOL', zone:'América do Sul', clubs:47, value:'€ 4,3 bi', color:'#0F1B2D'},
+  {ab:'BR2', name:'Brasileirão Série B', region:'Brasil', zone:'América do Sul', clubs:20, value:'€ 0,4 bi', color:'#4C5358'},
+  {ab:'ARG', name:'Primera División', region:'Argentina', zone:'América do Sul', clubs:28, value:'€ 0,9 bi', color:'#75AADB'},
+];
+
+const THREADS = [
+  {cat:'Valores', t:'Vini Jr a € 150 mi ainda faz sentido pós-Copa?', replies:214, time:'há 12 min', hot:true},
+  {cat:'Transferências', t:'Janela de julho: qual reforço seu clube precisa?', replies:89, time:'há 1 h', hot:true},
+  {cat:'Táticas', t:'O fim dos pontas invertidos? Tendências 2026/27', replies:57, time:'há 3 h'},
+  {cat:'Valores', t:'Metodologia: como a comunidade define um valor de mercado', replies:132, time:'há 6 h'},
+  {cat:'Transferências', t:'Osimhen no United: negócio bom para quem?', replies:76, time:'há 8 h'},
+];
+
+const COMP_DETAILS = {
+  UCL:{players:1080, topClubs:[['RMA',1400],['MCI',1250],['FCB',1200],['ARS',1150],['LIV',1100]]},
+  PL:{players:520, topClubs:[['MCI',1250],['ARS',1150],['LIV',1100],['CHE',1050],['MUN',820]]},
+  LL:{players:498, topClubs:[['RMA',1400],['FCB',1200],['ATM',780],['ATH',340],['Real Sociedad',280]]},
+  BL:{players:462, topClubs:[['BAY',950],['BVB',620],['LEV',480],['RB Leipzig',400],['Eintracht',330]]},
+  SA:{players:540, topClubs:[['INT',680],['JUV',580],['MIL',540],['Napoli',520],['Roma',390]]},
+  L1:{players:460, topClubs:[['PSG',1000],['Monaco',420],['Marseille',330],['Lille',260],['Lyon',240]]},
+  BR1:{players:560, topClubs:[['FLA',312],['PAL',285],['Botafogo',230],['Corinthians',195],['São Paulo',180]]},
+  LIB:{players:1120, topClubs:[['FLA',312],['PAL',285],['River Plate',210],['Boca Juniors',185],['Atlético-MG',150]]},
+  BR2:{players:520, topClubs:[['Santos',95],['Sport',60],['Coritiba',48],['Goiás',42],['Avaí',35]]},
+  ARG:{players:640, topClubs:[['River Plate',210],['Boca Juniors',185],['Racing',120],['Independiente',85],['San Lorenzo',70]]},
+};
+
+const CLUB_META = {
+  RMA:{league:'LL', country:'Espanha', value:1400, squad:25, avg:'26,3', forg:16},
+  FCB:{league:'LL', country:'Espanha', value:1200, squad:24, avg:'24,8', forg:12},
+  ATM:{league:'LL', country:'Espanha', value:780, squad:25, avg:'27,1', forg:15},
+  ATH:{league:'LL', country:'Espanha', value:340, squad:24, avg:'25,6', forg:0},
+  MCI:{league:'PL', country:'Inglaterra', value:1250, squad:24, avg:'26,9', forg:19},
+  ARS:{league:'PL', country:'Inglaterra', value:1150, squad:25, avg:'25,4', forg:17},
+  LIV:{league:'PL', country:'Inglaterra', value:1100, squad:26, avg:'26,1', forg:20},
+  CHE:{league:'PL', country:'Inglaterra', value:1050, squad:28, avg:'23,7', forg:21},
+  MUN:{league:'PL', country:'Inglaterra', value:820, squad:26, avg:'25,9', forg:18},
+  NEW:{league:'PL', country:'Inglaterra', value:700, squad:25, avg:'26,6', forg:14},
+  AVL:{league:'PL', country:'Inglaterra', value:560, squad:25, avg:'26,8', forg:16},
+  BAY:{league:'BL', country:'Alemanha', value:950, squad:24, avg:'25,7', forg:13},
+  BVB:{league:'BL', country:'Alemanha', value:620, squad:26, avg:'24,9', forg:15},
+  LEV:{league:'BL', country:'Alemanha', value:480, squad:25, avg:'25,2', forg:16},
+  JUV:{league:'SA', country:'Itália', value:580, squad:26, avg:'25,8', forg:14},
+  MIL:{league:'SA', country:'Itália', value:540, squad:25, avg:'26,2', forg:17},
+  INT:{league:'SA', country:'Itália', value:680, squad:25, avg:'27,4', forg:15},
+  PSG:{league:'L1', country:'França', value:1000, squad:25, avg:'24,6', forg:16},
+  GAL:{league:null, leagueName:'Süper Lig', country:'Turquia', value:310, squad:26, avg:'27,0', forg:14},
+  FLA:{league:'BR1', country:'Brasil', value:312, squad:28, avg:'26,4', forg:7},
+  PAL:{league:'BR1', country:'Brasil', value:285, squad:27, avg:'25,9', forg:8},
+};
+
+const SQUAD_EXTRA = {
+  RMA:[['Rodrygo','Ponta Direita',25,80],['Aurélien Tchouaméni','Volante',26,90]],
+  FCB:[['Raphinha','Ponta Esquerda',29,70],['Pau Cubarsí','Zagueiro',19,80]],
+  MCI:[['Phil Foden','Meia-atacante',26,110],['Rodri','Volante',30,90]],
+  ARS:[['Declan Rice','Volante',27,105],['William Saliba','Zagueiro',25,85]],
+  LIV:[['Ryan Gravenberch','Volante',24,75],['Mohamed Salah','Ponta Direita',34,45]],
+  CHE:[['Moisés Caicedo','Volante',24,90],['Enzo Fernández','Meio-campista',25,75]],
+  MUN:[['Kobbie Mainoo','Meio-campista',21,60],['Bruno Fernandes','Meia-atacante',31,55]],
+  NEW:[['Alexander Isak','Centroavante',26,110],['Bruno Guimarães','Volante',28,75]],
+  AVL:[['Morgan Rogers','Meia-atacante',24,65],['Emiliano Martínez','Goleiro',33,25]],
+  BAY:[['Jamal Musiala','Meia-atacante',23,135],['Michael Olise','Ponta Direita',24,100]],
+  BVB:[['Karim Adeyemi','Ponta Esquerda',24,45],['Serhou Guirassy','Centroavante',30,40]],
+  LEV:[['Alejandro Grimaldo','Lateral Esquerdo',30,40],['Granit Xhaka','Volante',33,18]],
+  JUV:[['Kenan Yıldız','Meia-atacante',21,75],['Gleison Bremer','Zagueiro',29,50]],
+  MIL:[['Rafael Leão','Ponta Esquerda',27,75],['Christian Pulisic','Meia-atacante',27,60]],
+  INT:[['Lautaro Martínez','Centroavante',28,95],['Alessandro Bastoni','Zagueiro',27,80]],
+  ATM:[['Julián Álvarez','Centroavante',26,110],['Antoine Griezmann','Meia-atacante',35,20]],
+  ATH:[['Oihan Sancet','Meia-atacante',26,60],['Unai Simón','Goleiro',29,30]],
+  PSG:[['Désiré Doué','Meia-atacante',21,90],['Vitinha','Meio-campista',26,90]],
+  GAL:[['Barış Alper Yılmaz','Ponta Direita',26,35],['Mauro Icardi','Centroavante',33,12]],
+  FLA:[['Pedro','Centroavante',29,30],['Gerson','Meio-campista',29,25]],
+  PAL:[['Flaco López','Centroavante',25,25],['Weverton','Goleiro',38,6]],
+};
+
+const initials = (n) => n.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+const fmtV = (v) => '€ ' + v + ' mi';
+const fmtBig = (v) => v >= 1000 ? '€ ' + String((v / 1000).toFixed(1)).replace('.', ',') + ' bi' : '€ ' + v + ' mi';
+
+class Component extends DCLogic {
+  state = {
+    screen: null, transferTab: 'rumores',
+    valueFilter: 'Todas', compFilter: 'Todas', forumCat: 'Todos',
+    forumVote: null, playerVote: null, playerId: 1, following: false,
+    stack: [], compAb: 'PL', clubKey: 'RMA',
+  };
+
+  go(s) { this.setState({ screen: s, stack: [] }); }
+
+  pushScreen(patch) {
+    this.setState(st => ({
+      ...patch,
+      stack: [...(st.stack || []), { screen: st.screen || 'home', playerId: st.playerId, compAb: st.compAb, clubKey: st.clubKey }],
+    }));
+  }
+
+  openPlayer(id) { this.pushScreen({ screen: 'player', playerId: id, playerVote: null, following: false }); }
+  openComp(ab) { this.pushScreen({ screen: 'comp', compAb: ab }); }
+  openClub(k) { this.pushScreen({ screen: 'club', clubKey: k }); }
+
+  popBack() {
+    this.setState(st => {
+      const s = [...(st.stack || [])];
+      const prev = s.pop() || { screen: 'home' };
+      return { ...prev, stack: s };
+    });
+  }
+
+  mkChips(labels, active, key) {
+    return labels.map(l => ({
+      label: l,
+      onClick: () => this.setState({ [key]: l }),
+      bg: l === active ? '#131711' : '#fff',
+      color: l === active ? '#fff' : '#4A5045',
+      border: l === active ? '1px solid #131711' : '1px solid #E4E6DC',
+    }));
+  }
+
+  renderVals() {
+    const S = this.state;
+    const showAds = this.props.showAds ?? true;
+    const showPro = this.props.showPro ?? true;
+    const screen = S.screen ?? (this.props.defaultScreen ?? 'home');
+    const div = (arr) => arr.map((x, i) => ({ ...x, divider: i === arr.length - 1 ? 'none' : '1px solid #EEF0E6' }));
+    const badge = (ab) => ({ color: CLUBS[ab].c, text: CLUBS[ab].t || '#fff' });
+
+    const matches = MATCHES.map(m => ({
+      comp: m.comp, status: m.live ? 'AO VIVO · ' + m.status : m.status,
+      statusBg: m.live ? '#C8F04B' : '#EDEFE5', statusColor: m.live ? '#131711' : '#70776B',
+      dotColor: '#DE4A32', dotDisplay: m.live ? 'inline-block' : 'none',
+      home: m.home, homeName: CLUBS[m.home].n, homeColor: badge(m.home).color, homeText: badge(m.home).text, homeScore: m.hs,
+      away: m.away, awayName: CLUBS[m.away].n, awayColor: badge(m.away).color, awayText: badge(m.away).text, awayScore: m.as,
+    }));
+
+    const impact = div([
+      { name:'Florian Wirtz', route:'Leverkusen → Liverpool', fee:'€ 125 mi', tag:'CONFIRMADA', tagBg:'#E6F4E9', tagColor:'#189A5A', initials:'FW', open:() => this.openPlayer(6) },
+      { name:'Nico Williams', route:'Athletic → Arsenal', fee:'€ 95 mi', tag:'CONFIRMADA', tagBg:'#E6F4E9', tagColor:'#189A5A', initials:'NW', open:undefined },
+      { name:'Endrick', route:'Real Madrid → Aston Villa', fee:'Empréstimo', tag:'RUMOR 81%', tagBg:'#FBEEE0', tagColor:'#E07B12', initials:'EN', open:() => this.openPlayer(10) },
+    ]);
+
+    const news = div(NEWS.map(n => ({ ...n })));
+
+    const rumors = RUMORS.map(r => ({
+      ...r, initials: initials(r.name),
+      fromName: CLUBS[r.from].n, fromColor: badge(r.from).color, fromText: badge(r.from).text,
+      toName: CLUBS[r.to].n, toColor: badge(r.to).color, toText: badge(r.to).text,
+      heatW: r.heat + '%', heatPct: r.heat + '%',
+      heatColor: r.heat >= 70 ? '#DE4A32' : (r.heat >= 50 ? '#E07B12' : '#9AA093'),
+    }));
+    const confirmed = div(CONFIRMED.map(c => ({ ...c, initials: initials(c.name) })));
+
+    const players = PLAYERS.map((p, i) => ({
+      ...p, rank: i + 1, initials: initials(p.name),
+      clubName: CLUBS[p.club].n, clubColor: CLUBS[p.club].c,
+      valueStr: fmtV(p.value),
+      arrow: p.delta > 0 ? '▲' : (p.delta < 0 ? '▼' : '•'),
+      deltaStr: p.delta > 0 ? '+' + p.delta + ' mi' : (p.delta < 0 ? '−' + Math.abs(p.delta) + ' mi' : 'estável'),
+      deltaColor: p.delta > 0 ? '#189A5A' : (p.delta < 0 ? '#DE4A32' : '#9AA093'),
+      open: () => this.openPlayer(p.id),
+      clubOpen: (e) => { e.stopPropagation(); this.openClub(p.club); },
+    }));
+    const valueChips = this.mkChips(['Todas', 'Espanha', 'Inglaterra', 'Brasil'], S.valueFilter, 'valueFilter');
+    const valuePlayers = div(S.valueFilter === 'Todas' ? players : players.filter(p => p.nat === S.valueFilter));
+    const top5 = div(players.slice(0, 5));
+
+    const compChips = this.mkChips(['Todas', 'Europa', 'América do Sul'], S.compFilter, 'compFilter');
+    const comps = div((S.compFilter === 'Todas' ? COMPS : COMPS.filter(c => c.zone === S.compFilter)).map(c => ({ ...c, open: () => this.openComp(c.ab) })));
+
+    const mkVote = (defs, sel, key) => {
+      const total = defs.reduce((s, d) => s + d.count, 0) + (sel ? 1 : 0);
+      return { total, opts: defs.map(d => {
+        const c = d.count + (sel === d.k ? 1 : 0);
+        const pct = Math.round(c / total * 100);
+        return {
+          label: d.label, pctStr: pct + '%', barW: pct + '%',
+          bg: sel === d.k ? '#F3FADF' : '#fff',
+          border: sel === d.k ? '1.5px solid #131711' : '1px solid #E4E6DC',
+          bgDark: sel === d.k ? 'rgba(200,240,75,0.16)' : 'rgba(255,255,255,0.06)',
+          borderDark: sel === d.k ? '1.5px solid #C8F04B' : '1px solid rgba(255,255,255,0.1)',
+          onClick: () => this.setState({ [key]: d.k }),
+        };
+      })};
+    };
+    const fv = mkVote([
+      { k:'cair', label:'Deve cair', count:118 }, { k:'manter', label:'Está justo', count:342 }, { k:'subir', label:'Deve subir', count:167 },
+    ], S.forumVote, 'forumVote');
+    const forumChips = this.mkChips(['Todos', 'Valores', 'Transferências', 'Táticas'], S.forumCat, 'forumCat');
+    const threads = div((S.forumCat === 'Todos' ? THREADS : THREADS.filter(t => t.cat === S.forumCat)).map(t => ({
+      ...t, catLabel: t.cat.toUpperCase(), hotDisplay: t.hot ? 'block' : 'none',
+    })));
+
+    const p = PLAYERS.find(x => x.id === S.playerId) || PLAYERS[0];
+    const h = p.history, hMin = Math.min(...h), hMax = Math.max(...h);
+    const pts = h.map((v, i) => [
+      +(i * (330 / (h.length - 1))).toFixed(1),
+      +(58 - ((v - hMin) / ((hMax - hMin) || 1)) * 46).toFixed(1),
+    ]);
+    const sparkPoints = pts.map(pt => pt.join(',')).join(' ');
+    const pv = mkVote([
+      { k:'baixo', label:'Baixo', count:96 }, { k:'justo', label:'Justo', count:410 }, { k:'alto', label:'Alto', count:154 },
+    ], S.playerVote, 'playerVote');
+
+    const compAb2 = S.compAb || 'PL';
+    const compC = COMPS.find(c => c.ab === compAb2) || COMPS[1];
+    const cdet = COMP_DETAILS[compAb2] || { players: 0, topClubs: [] };
+    const compClubs = cdet.topClubs.map(([k, v], i) => {
+      const kn = CLUBS[k];
+      return {
+        rank: i + 1, name: kn ? kn.n : k, ab: kn ? k : initials(k),
+        color: kn ? kn.c : '#B4B9AA', text: kn ? (kn.t || '#fff') : '#fff',
+        valueStr: fmtBig(v),
+        open: kn ? () => this.openClub(k) : undefined,
+        chev: kn ? 'visible' : 'hidden',
+      };
+    });
+
+    const ck = S.clubKey || 'RMA';
+    const cmeta = CLUB_META[ck] || { league: null, leagueName: '—', country: '—', value: 0, squad: 0, avg: '—', forg: 0 };
+    const clubComp = cmeta.league ? COMPS.find(c => c.ab === cmeta.league) : null;
+    const knownSquad = players.filter(pl => pl.club === ck).map(pl => ({
+      name: pl.name, initials: pl.initials, sub: pl.pos + ' · ' + pl.age + ' anos', valueStr: pl.valueStr, open: pl.open,
+    }));
+    const extraSquad = (SQUAD_EXTRA[ck] || []).map(([n, pos, age, v]) => ({
+      name: n, initials: initials(n), sub: pos + ' · ' + age + ' anos', valueStr: fmtV(v), open: undefined,
+    }));
+
+    return {
+      bwW: 1360, bwH: 860,
+      showAds, showPro,
+      showHome: screen === 'home', showTransfers: screen === 'transfers', showValues: screen === 'values',
+      showCompetitions: screen === 'competitions', showForum: screen === 'forum', showPlayer: screen === 'player',
+      showComp: screen === 'comp', showClub: screen === 'club',
+      goHome: () => this.go('home'), goTransfers: () => this.go('transfers'), goValues: () => this.go('values'),
+      goCompetitions: () => this.go('competitions'), goForum: () => this.go('forum'),
+      goBack: () => this.popBack(),
+
+      navItems: [
+        { key:'home', label:'Início' }, { key:'transfers', label:'Transferências' },
+        { key:'values', label:'Valores de Mercado' }, { key:'competitions', label:'Competições' },
+        { key:'forum', label:'Fórum' },
+      ].map(ni => ({
+        ...ni, onClick: () => this.go(ni.key),
+        bg: screen === ni.key || (ni.key === 'competitions' && (screen === 'comp' || screen === 'club')) ? '#131711' : 'transparent',
+        color: screen === ni.key || (ni.key === 'competitions' && (screen === 'comp' || screen === 'club')) ? '#fff' : '#4A5045',
+      })),
+
+      matches, impact, news, top5,
+      showRumores: S.transferTab === 'rumores', showConfirmadas: S.transferTab === 'confirmadas',
+      tabRumores: () => this.setState({ transferTab: 'rumores' }),
+      tabConfirmadas: () => this.setState({ transferTab: 'confirmadas' }),
+      rumTabBg: S.transferTab === 'rumores' ? '#fff' : 'transparent',
+      rumTabColor: S.transferTab === 'rumores' ? '#131711' : '#70776B',
+      confTabBg: S.transferTab === 'confirmadas' ? '#fff' : 'transparent',
+      confTabColor: S.transferTab === 'confirmadas' ? '#131711' : '#70776B',
+      rumors, confirmed,
+
+      valueChips, valuePlayers, compChips, comps,
+
+      forumOpts: fv.opts, forumTotal: fv.total.toLocaleString('pt-BR'),
+      forumHint: S.forumVote ? 'seu voto foi registrado' : 'toque para votar',
+      forumChips, threads,
+
+      compAb: compC.ab, compName: compC.name, compColor: compC.color,
+      compRegion: compC.region, compClubsCount: compC.clubs, compValue: compC.value,
+      compPlayers: cdet.players, compClubs: div(compClubs),
+      clubAb: ck, clubName2: CLUBS[ck] ? CLUBS[ck].n : ck,
+      clubColor2: CLUBS[ck] ? CLUBS[ck].c : '#B4B9AA', clubText2: CLUBS[ck] && CLUBS[ck].t ? CLUBS[ck].t : '#fff',
+      clubLeagueName: clubComp ? clubComp.name : (cmeta.leagueName || '—'),
+      clubCountry: cmeta.country, clubValueStr: fmtBig(cmeta.value),
+      clubSquadN: cmeta.squad, clubAvg: cmeta.avg, clubForg: cmeta.forg,
+      clubLeagueOpen: clubComp ? () => this.openComp(clubComp.ab) : undefined,
+      squad: div([...knownSquad, ...extraSquad]),
+
+      pName: p.name, pFirstName: p.name.split(' ')[0], pInitials: initials(p.name),
+      pClubName: CLUBS[p.club].n, pClubColor: CLUBS[p.club].c,
+      pClubOpen: () => this.openClub(p.club),
+      pPos: p.pos, pAge: p.age, pNat: p.nat, pValueStr: fmtV(p.value),
+      pDeltaLong: p.delta > 0 ? '+€ ' + p.delta + ' mi no trimestre' : (p.delta < 0 ? '−€ ' + Math.abs(p.delta) + ' mi no trimestre' : 'estável no trimestre'),
+      sparkPoints, sparkArea: '0,70 ' + sparkPoints + ' 330,70',
+      sparkLastX: pts[pts.length - 1][0], sparkLastY: pts[pts.length - 1][1],
+      pVoteQuestion: fmtV(p.value) + ' é um valor justo hoje?',
+      playerOpts: pv.opts, pVoteTotal: pv.total.toLocaleString('pt-BR'),
+      pStatJ: p.stats.j, pStatG: p.stats.g, pStatA: p.stats.a, pStatM: p.stats.m,
+      pContract: p.contract, pTransfers: div(p.transfers.map(t => ({ ...t }))),
+      toggleFollow: () => this.setState(st => ({ following: !st.following })),
+      followLabel: S.following ? 'Seguindo' : 'Seguir jogador',
+      followBg: S.following ? '#131711' : '#C8F04B',
+      followColor: S.following ? '#C8F04B' : '#131711',
+      followBorder: S.following ? '1px solid #131711' : '1px solid #B8E135',
+    };
+  }
+}
+</script>
+</body>
+</html>

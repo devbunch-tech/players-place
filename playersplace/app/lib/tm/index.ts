@@ -1,0 +1,809 @@
+/**
+ * Serviço de dados do Players Place — consultas ao Transfermarkt
+ * com cache em memória por rota.
+ */
+import {cached, tmApiJson, tmHtml, tmJson} from './client';
+import {positionMeta} from './positions';
+import {
+  parseClub,
+  parseClubTransfers,
+  parseLeagueOverview,
+  parsePlayer,
+  parseSearch,
+  parseStandings,
+  parseTransfers,
+  parseValueRanking,
+  type ClubProfile,
+  type ClubTransfers,
+  type LeagueOverview,
+  type PlayerProfile,
+  type RankedPlayer,
+  type SearchResults,
+  type StandingsGroup,
+  type TransferRow,
+} from './parse';
+
+export * from './leagues';
+export * from './parse';
+export * from './positions';
+
+const HOUR = 3600;
+
+/** escudo de clube/seleção no CDN do Transfermarkt */
+export function clubCrest(id: string | number): string {
+  return `https://tmssl.akamaized.net/images/wappen/medium/${id}.png`;
+}
+
+// ---------- APIs JSON internas do Transfermarkt (ceapi) ----------
+export interface CeapiTransfer {
+  url: string;
+  date: string;
+  dateUnformatted: string;
+  season: string;
+  marketValue: string;
+  fee: string;
+  from: {href: string; clubName: string; 'clubEmblem-1x'?: string};
+  to: {href: string; clubName: string; 'clubEmblem-1x'?: string};
+}
+
+export interface MarketValuePoint {
+  x: number;
+  y: number;
+  mw: string;
+  datum_mw: string;
+  verein: string;
+  age: string;
+}
+
+export interface MarketValueGraph {
+  list: MarketValuePoint[];
+  current: string;
+  highest: string;
+  highest_date: string;
+  last_change: string;
+}
+
+export function getLeagueOverview(code: string): Promise<LeagueOverview> {
+  return cached(`league:${code}`, 6 * HOUR, async () =>
+    parseLeagueOverview(await tmHtml(`/-/startseite/wettbewerb/${code}`)),
+  );
+}
+
+export function getLeagueStandings(code: string): Promise<StandingsGroup[]> {
+  return cached(`standings:${code}`, HOUR, async () =>
+    parseStandings(await tmHtml(`/-/tabelle/wettbewerb/${code}`)),
+  );
+}
+
+export function getLeagueTopPlayers(code: string): Promise<RankedPlayer[]> {
+  return cached(`leaguetop:${code}`, 6 * HOUR, async () =>
+    parseValueRanking(await tmHtml(`/-/marktwerte/wettbewerb/${code}`)),
+  );
+}
+
+export function getGlobalTopPlayers(): Promise<RankedPlayer[]> {
+  return cached('globaltop', 6 * HOUR, async () =>
+    parseValueRanking(
+      await tmHtml('/spieler-statistik/wertvollstespieler/marktwertetop'),
+    ),
+  );
+}
+
+export function getClub(id: string): Promise<ClubProfile> {
+  return cached(`club:${id}`, 6 * HOUR, async () =>
+    parseClub(await tmHtml(`/-/startseite/verein/${id}`)),
+  );
+}
+
+/**
+ * Entradas e saídas de um clube numa temporada. Sem `season` o Transfermarkt
+ * devolve a temporada corrente (e o `select` da página nos dá a lista toda).
+ */
+export function getClubTransfers(
+  id: string,
+  season?: string | null,
+): Promise<ClubTransfers> {
+  return cached(`clubtr:${id}:${season ?? 'atual'}`, 6 * HOUR, async () =>
+    parseClubTransfers(
+      await tmHtml(
+        season
+          ? `/-/transfers/verein/${id}/saison_id/${season}`
+          : `/-/transfers/verein/${id}`,
+      ),
+    ),
+  );
+}
+
+export function getPlayer(id: string): Promise<PlayerProfile> {
+  return cached(`player:${id}`, 6 * HOUR, async () =>
+    parsePlayer(await tmHtml(`/-/profil/spieler/${id}`)),
+  );
+}
+
+export function getPlayerTransfers(id: string): Promise<CeapiTransfer[]> {
+  return cached(`ptransfers:${id}`, 6 * HOUR, async () => {
+    const data = await tmJson<{transfers: CeapiTransfer[]}>(
+      `/ceapi/transferHistory/list/${id}`,
+    );
+    return data.transfers ?? [];
+  });
+}
+
+export function getPlayerMarketValueGraph(
+  id: string,
+): Promise<MarketValueGraph | null> {
+  return cached(`pmv:${id}`, 6 * HOUR, async () => {
+    try {
+      const data = await tmJson<MarketValueGraph>(
+        `/ceapi/marketValueDevelopment/graph/${id}`,
+      );
+      return data?.list?.length ? data : null;
+    } catch {
+      return null;
+    }
+  });
+}
+
+// ---------- Desempenho por temporada (tmapi.transfermarkt.technology) ----------
+interface ApiSeasonPerfItem {
+  generalInformation: {
+    seasonId: number;
+    competitionId: string;
+    clubId: string;
+    season: {display: string};
+  };
+  statistics: {
+    goalStatistics: {
+      goalsSum: number;
+      assistsSum: number;
+      opponentGoalsOnThePitch: number;
+    };
+    cardStatistics: {
+      yellowCardNetSum: number;
+      yellowRedCardsCount: number;
+      redCardsCount: number;
+    };
+    playingTimeStatistics: {
+      playedMinutesSum: number;
+      startingCount: number;
+      appearancesCount: number;
+    };
+  };
+}
+
+export interface CompetitionPerf {
+  competitionId: string;
+  name: string;
+  games: number;
+  goals: number;
+  assists: number;
+  conceded: number;
+  starts: number;
+  yellow: number;
+  red: number;
+  minutes: number;
+}
+
+export interface SeasonPerf {
+  seasonId: number;
+  label: string;
+  rows: CompetitionPerf[];
+  total: Omit<CompetitionPerf, 'competitionId' | 'name'>;
+}
+
+const MAX_SEASONS = 5;
+
+/** resposta bruta de desempenho por temporada, reaproveitada pelos agregados */
+function getRawSeasonPerformance(id: string): Promise<ApiSeasonPerfItem[]> {
+  return cached(`perfraw:${id}`, 6 * HOUR, async () => {
+    const res = await tmApiJson<{
+      success: boolean;
+      data?: {performance?: ApiSeasonPerfItem[]};
+    }>(`/player/${id}/performance-season`);
+    return res.data?.performance ?? [];
+  });
+}
+
+/** a URL de `ids[]=` cresce rápido; consultamos em lotes */
+async function fetchInChunks<T>(
+  path: string,
+  ids: string[],
+  size = 60,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += size) {
+    const qs = ids
+      .slice(i, i + size)
+      .map((v) => `ids[]=${encodeURIComponent(v)}`)
+      .join('&');
+    try {
+      const res = await tmApiJson<{data?: T[]}>(`${path}?${qs}`);
+      out.push(...(res.data ?? []));
+    } catch {
+      // lote indisponível — seguimos com o que der
+    }
+  }
+  return out;
+}
+
+interface ApiClub {
+  id: string;
+  name: string;
+  baseDetails?: {shortName?: string; isNationalTeam?: boolean};
+}
+
+/** nomes de clubes/seleções por id */
+async function fetchClubNames(ids: string[]): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  if (!ids.length) return names;
+  for (const c of await fetchInChunks<ApiClub>('/clubs', ids)) {
+    names.set(c.id, c.baseDetails?.shortName || c.name);
+  }
+  return names;
+}
+
+/** nomes de competições por id */
+async function fetchCompetitionNames(
+  ids: string[],
+): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  if (!ids.length) return names;
+  for (const c of await fetchInChunks<{id: string; name: string}>(
+    '/competitions',
+    ids,
+  )) {
+    names.set(c.id, c.name);
+  }
+  return names;
+}
+
+export function getPlayerPerformance(id: string): Promise<SeasonPerf[]> {
+  return cached(`perf:${id}`, 6 * HOUR, async () => {
+    const items = await getRawSeasonPerformance(id);
+
+    // agrega por temporada → competição (um jogador pode repetir a mesma
+    // competição na temporada ao trocar de clube)
+    const bySeason = new Map<
+      number,
+      {labels: string[]; comps: Map<string, CompetitionPerf>}
+    >();
+    for (const it of items) {
+      const pt = it.statistics.playingTimeStatistics;
+      if (!pt.appearancesCount) continue;
+      const sid = it.generalInformation.seasonId;
+      const cid = it.generalInformation.competitionId;
+      let season = bySeason.get(sid);
+      if (!season) {
+        season = {labels: [], comps: new Map()};
+        bySeason.set(sid, season);
+      }
+      season.labels.push(it.generalInformation.season.display);
+      let comp = season.comps.get(cid);
+      if (!comp) {
+        comp = {
+          competitionId: cid,
+          name: cid,
+          games: 0,
+          goals: 0,
+          assists: 0,
+          conceded: 0,
+          starts: 0,
+          yellow: 0,
+          red: 0,
+          minutes: 0,
+        };
+        season.comps.set(cid, comp);
+      }
+      comp.games += pt.appearancesCount;
+      comp.starts += pt.startingCount;
+      comp.minutes += pt.playedMinutesSum;
+      comp.goals += it.statistics.goalStatistics.goalsSum;
+      comp.assists += it.statistics.goalStatistics.assistsSum;
+      comp.conceded += it.statistics.goalStatistics.opponentGoalsOnThePitch;
+      comp.yellow += it.statistics.cardStatistics.yellowCardNetSum;
+      comp.red +=
+        it.statistics.cardStatistics.redCardsCount +
+        it.statistics.cardStatistics.yellowRedCardsCount;
+    }
+
+    const seasonIds = [...bySeason.keys()]
+      .sort((a, b) => b - a)
+      .slice(0, MAX_SEASONS);
+
+    // nomes das competições envolvidas
+    const compIds = new Set<string>();
+    for (const sid of seasonIds) {
+      for (const cid of bySeason.get(sid)!.comps.keys()) compIds.add(cid);
+    }
+    // sem nomes, exibimos o código da competição
+    const names = await fetchCompetitionNames([...compIds]);
+
+    return seasonIds.map((sid) => {
+      const season = bySeason.get(sid)!;
+      // rótulo mais frequente entre as competições da temporada
+      const counts = new Map<string, number>();
+      for (const l of season.labels) counts.set(l, (counts.get(l) ?? 0) + 1);
+      const label = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+      const rows = [...season.comps.values()]
+        .map((c) => ({...c, name: names.get(c.competitionId) ?? c.competitionId}))
+        .sort((a, b) => b.minutes - a.minutes);
+      const total = rows.reduce(
+        (acc, c) => ({
+          games: acc.games + c.games,
+          goals: acc.goals + c.goals,
+          assists: acc.assists + c.assists,
+          conceded: acc.conceded + c.conceded,
+          starts: acc.starts + c.starts,
+          yellow: acc.yellow + c.yellow,
+          red: acc.red + c.red,
+          minutes: acc.minutes + c.minutes,
+        }),
+        {games: 0, goals: 0, assists: 0, conceded: 0, starts: 0, yellow: 0, red: 0, minutes: 0},
+      );
+      return {seasonId: sid, label, rows, total};
+    });
+  });
+}
+
+// ---------- Carreira completa (por competição e por clube) ----------
+export interface CareerRow {
+  /** id da competição ou do clube, conforme a lista */
+  key: string;
+  name: string;
+  games: number;
+  goals: number;
+  assists: number;
+  conceded: number;
+  starts: number;
+  minutes: number;
+}
+
+export type CareerTotal = Omit<CareerRow, 'key' | 'name'>;
+
+export interface PlayerCareer {
+  competitions: CareerRow[];
+  clubs: CareerRow[];
+  total: CareerTotal;
+}
+
+const emptyTotal = (): CareerTotal => ({
+  games: 0,
+  goals: 0,
+  assists: 0,
+  conceded: 0,
+  starts: 0,
+  minutes: 0,
+});
+
+/** minutos em campo por gol marcado — null quando o jogador não marcou */
+export function minutesPerGoal(row: CareerTotal): number | null {
+  return row.goals > 0 ? Math.round(row.minutes / row.goals) : null;
+}
+
+/**
+ * Totais de toda a carreira somados por competição e por clube —
+ * alimenta os blocos "Desempenho por competição" e "Desempenho por clube".
+ */
+export function getPlayerCareer(id: string): Promise<PlayerCareer | null> {
+  return cached(`career:${id}`, 6 * HOUR, async () => {
+    const items = await getRawSeasonPerformance(id);
+    if (!items.length) return null;
+
+    const byComp = new Map<string, CareerTotal>();
+    const byClub = new Map<string, CareerTotal>();
+    const total = emptyTotal();
+
+    for (const it of items) {
+      const pt = it.statistics.playingTimeStatistics;
+      if (!pt.appearancesCount) continue;
+      const add = (bucket: Map<string, CareerTotal>, key: string) => {
+        let row = bucket.get(key);
+        if (!row) bucket.set(key, (row = emptyTotal()));
+        return row;
+      };
+      for (const row of [
+        add(byComp, it.generalInformation.competitionId),
+        add(byClub, it.generalInformation.clubId),
+        total,
+      ]) {
+        row.games += pt.appearancesCount;
+        row.starts += pt.startingCount;
+        row.minutes += pt.playedMinutesSum;
+        row.goals += it.statistics.goalStatistics.goalsSum;
+        row.assists += it.statistics.goalStatistics.assistsSum;
+        row.conceded += it.statistics.goalStatistics.opponentGoalsOnThePitch;
+      }
+    }
+
+    const [compNames, clubNames] = await Promise.all([
+      fetchCompetitionNames([...byComp.keys()]),
+      fetchClubNames([...byClub.keys()]),
+    ]);
+
+    const toRows = (
+      bucket: Map<string, CareerTotal>,
+      names: Map<string, string>,
+    ): CareerRow[] =>
+      [...bucket.entries()]
+        .map(([key, v]) => ({key, name: names.get(key) ?? key, ...v}))
+        .sort((a, b) => b.games - a.games || b.minutes - a.minutes);
+
+    return {
+      competitions: toRows(byComp, compNames),
+      clubs: toRows(byClub, clubNames),
+      total,
+    };
+  });
+}
+
+// ---------- Titularidades por temporada ----------
+export interface SeasonClubStarts {
+  seasonId: number;
+  label: string;
+  clubId: string;
+  clubName: string;
+  games: number;
+  starts: number;
+  minutes: number;
+  goals: number;
+  assists: number;
+}
+
+/**
+ * Quantas vezes o jogador começou como titular em cada clube, temporada a
+ * temporada. Uma temporada pode render mais de uma linha quando houve
+ * transferência no meio do ano.
+ */
+export function getPlayerStartsBySeason(
+  id: string,
+): Promise<SeasonClubStarts[]> {
+  return cached(`starts:${id}`, 6 * HOUR, async () => {
+    const items = await getRawSeasonPerformance(id);
+    if (!items.length) return [];
+
+    // uma mesma temporada aparece como "2019" nas ligas de ano-calendário e
+    // "18/19" nas europeias; fixamos o rótulo mais frequente de cada seasonId
+    const labelVotes = new Map<number, Map<string, number>>();
+    for (const it of items) {
+      if (!it.statistics.playingTimeStatistics.appearancesCount) continue;
+      const {seasonId, season} = it.generalInformation;
+      let votes = labelVotes.get(seasonId);
+      if (!votes) labelVotes.set(seasonId, (votes = new Map()));
+      votes.set(season.display, (votes.get(season.display) ?? 0) + 1);
+    }
+    const labelOf = (seasonId: number, fallback: string) => {
+      const votes = labelVotes.get(seasonId);
+      if (!votes) return fallback;
+      return [...votes.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    };
+
+    const bucket = new Map<
+      string,
+      Omit<SeasonClubStarts, 'clubName'> & {clubName?: string}
+    >();
+    for (const it of items) {
+      const pt = it.statistics.playingTimeStatistics;
+      if (!pt.appearancesCount) continue;
+      const {seasonId, clubId, season} = it.generalInformation;
+      const key = `${seasonId}:${clubId}`;
+      let row = bucket.get(key);
+      if (!row) {
+        row = {
+          seasonId,
+          label: labelOf(seasonId, season.display),
+          clubId,
+          games: 0,
+          starts: 0,
+          minutes: 0,
+          goals: 0,
+          assists: 0,
+        };
+        bucket.set(key, row);
+      }
+      row.games += pt.appearancesCount;
+      row.starts += pt.startingCount;
+      row.minutes += pt.playedMinutesSum;
+      row.goals += it.statistics.goalStatistics.goalsSum;
+      row.assists += it.statistics.goalStatistics.assistsSum;
+    }
+
+    const names = await fetchClubNames([
+      ...new Set([...bucket.values()].map((r) => r.clubId)),
+    ]);
+    return [...bucket.values()]
+      .map((r) => ({...r, clubName: names.get(r.clubId) ?? r.clubId}))
+      .sort((a, b) => b.seasonId - a.seasonId || b.games - a.games);
+  });
+}
+
+// ---------- Carreira na seleção ----------
+interface ApiNationalCareer {
+  clubId: string;
+  gamesPlayed: number;
+  goalsScored: number;
+  shirtNumber: number | null;
+  isCaptain: boolean;
+  debut: string | null;
+  careerState: string;
+}
+
+export interface NationalTeamRow {
+  clubId: string;
+  name: string;
+  games: number;
+  goals: number;
+  shirtNumber: number | null;
+  isCaptain: boolean;
+  /** data de estreia em dd/mm/aaaa */
+  debut: string | null;
+  current: boolean;
+}
+
+const isoToBr = (iso: string | null): string | null => {
+  const m = iso?.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : null;
+};
+
+/** dd/mm/aa — formato usado nas súmulas do Transfermarkt */
+const isoToBrShort = (iso: string | null): string | null => {
+  const m = iso?.match(/^(\d{2})(\d{2})-(\d{2})-(\d{2})/);
+  return m ? `${m[4]}/${m[3]}/${m[2]}` : null;
+};
+
+export function getPlayerNationalCareer(id: string): Promise<NationalTeamRow[]> {
+  return cached(`nat:${id}`, 6 * HOUR, async () => {
+    const res = await tmApiJson<{data?: {history?: ApiNationalCareer[]}}>(
+      `/player/${id}/national-career-history`,
+    );
+    const history = res.data?.history ?? [];
+    if (!history.length) return [];
+    const names = await fetchClubNames(history.map((h) => h.clubId));
+    return history
+      .map((h) => ({
+        clubId: h.clubId,
+        name: names.get(h.clubId) ?? h.clubId,
+        games: h.gamesPlayed,
+        goals: h.goalsScored,
+        shirtNumber: h.shirtNumber || null,
+        isCaptain: h.isCaptain,
+        debut: isoToBr(h.debut),
+        current: h.careerState === 'CURRENT_NATIONAL_PLAYER',
+      }))
+      .sort(
+        (a, b) => Number(b.current) - Number(a.current) || b.games - a.games,
+      );
+  });
+}
+
+// ---------- Jogo a jogo + posições em que jogou ----------
+interface ApiGameItem {
+  gameInformation: {
+    gameId: string;
+    competitionId: string;
+    seasonId: number;
+    gameDay: number | null;
+    date: {dateTimeUTC: string};
+    season: {display: string};
+  };
+  clubsInformation: {
+    club: {
+      venue: string;
+      clubId: string;
+      goalsTotal: number;
+      opponentGoalsTotal: number;
+      clubRank: number | null;
+    };
+    opponent: {clubId: string; clubRank: number | null};
+  };
+  statistics: {
+    generalStatistics: {participationState: string; positionId: number | null};
+    goalStatistics: {
+      goalsScoredTotal: number;
+      assists: number;
+      opponentGoalsOnThePitch: number;
+    };
+    cardStatistics: {yellowCardNet: number};
+    playingTimeStatistics: {playedMinutes: number | null};
+  };
+}
+
+export type GameState = 'played' | 'squad' | 'out' | 'injured' | 'absent';
+
+export interface GameRow {
+  gameId: string;
+  matchDay: number | null;
+  /** dd/mm/aa */
+  date: string | null;
+  /** C (casa), F (fora) ou D (campo neutro) */
+  venue: string;
+  clubRank: number | null;
+  opponentId: string;
+  opponentName: string;
+  opponentRank: number | null;
+  score: string;
+  /** V/E/D do ponto de vista do time do jogador */
+  outcome: 'V' | 'E' | 'D';
+  state: GameState;
+  position: string | null;
+  goals: number;
+  assists: number;
+  yellow: number;
+  minutes: number | null;
+}
+
+export interface GameCompetitionGroup {
+  competitionId: string;
+  name: string;
+  rows: GameRow[];
+}
+
+export interface SeasonGames {
+  seasonId: number;
+  label: string;
+  groups: GameCompetitionGroup[];
+}
+
+export interface PositionPerf {
+  positionId: number;
+  games: number;
+  goals: number;
+  assists: number;
+  conceded: number;
+  cleanSheets: number;
+}
+
+export interface PlayerGameLog {
+  positions: PositionPerf[];
+  seasons: SeasonGames[];
+}
+
+const GAME_STATES: Record<string, GameState> = {
+  played: 'played',
+  'in squad': 'squad',
+  'not in squad': 'out',
+  injured: 'injured',
+  absent: 'absent',
+};
+
+const VENUES: Record<string, string> = {home: 'C', away: 'F', neutral: 'D'};
+
+/** quantas temporadas de súmula enviamos ao navegador */
+const MAX_GAME_SEASONS = 5;
+
+/**
+ * Súmula jogo a jogo das últimas temporadas e agregado de posições
+ * de toda a carreira — ambos derivados da mesma resposta da API.
+ */
+export function getPlayerGameLog(id: string): Promise<PlayerGameLog | null> {
+  return cached(`games:${id}`, 6 * HOUR, async () => {
+    const res = await tmApiJson<{data?: {performance?: ApiGameItem[]}}>(
+      `/player/${id}/performance-game`,
+    );
+    const items = res.data?.performance ?? [];
+    if (!items.length) return null;
+
+    // posições consideram apenas jogos disputados, em toda a carreira
+    const byPosition = new Map<number, PositionPerf>();
+    for (const it of items) {
+      const g = it.statistics.generalStatistics;
+      if (g.participationState !== 'played' || !g.positionId) continue;
+      let p = byPosition.get(g.positionId);
+      if (!p) {
+        p = {
+          positionId: g.positionId,
+          games: 0,
+          goals: 0,
+          assists: 0,
+          conceded: 0,
+          cleanSheets: 0,
+        };
+        byPosition.set(g.positionId, p);
+      }
+      const conceded = it.statistics.goalStatistics.opponentGoalsOnThePitch;
+      p.games += 1;
+      p.goals += it.statistics.goalStatistics.goalsScoredTotal;
+      p.assists += it.statistics.goalStatistics.assists;
+      p.conceded += conceded;
+      if (conceded === 0) p.cleanSheets += 1;
+    }
+
+    // súmula das temporadas mais recentes
+    const seasonIds = [
+      ...new Set(items.map((it) => it.gameInformation.seasonId)),
+    ]
+      .sort((a, b) => b - a)
+      .slice(0, MAX_GAME_SEASONS);
+    const recent = items.filter((it) =>
+      seasonIds.includes(it.gameInformation.seasonId),
+    );
+
+    const [compNames, clubNames] = await Promise.all([
+      fetchCompetitionNames([
+        ...new Set(recent.map((it) => it.gameInformation.competitionId)),
+      ]),
+      fetchClubNames([
+        ...new Set(recent.map((it) => it.clubsInformation.opponent.clubId)),
+      ]),
+    ]);
+
+    const seasons: SeasonGames[] = seasonIds.map((sid) => {
+      const games = recent.filter((it) => it.gameInformation.seasonId === sid);
+      const groups = new Map<string, GameRow[]>();
+      for (const it of games) {
+        const gi = it.gameInformation;
+        const club = it.clubsInformation.club;
+        const opp = it.clubsInformation.opponent;
+        const stats = it.statistics;
+        const outcome =
+          club.goalsTotal > club.opponentGoalsTotal
+            ? 'V'
+            : club.goalsTotal < club.opponentGoalsTotal
+              ? 'D'
+              : 'E';
+        const row: GameRow = {
+          gameId: gi.gameId,
+          matchDay: gi.gameDay || null,
+          date: isoToBrShort(gi.date?.dateTimeUTC ?? null),
+          venue: VENUES[club.venue] ?? '',
+          clubRank: club.clubRank,
+          opponentId: opp.clubId,
+          opponentName: clubNames.get(opp.clubId) ?? opp.clubId,
+          opponentRank: opp.clubRank,
+          score: `${club.goalsTotal}:${club.opponentGoalsTotal}`,
+          outcome,
+          state:
+            GAME_STATES[stats.generalStatistics.participationState] ?? 'out',
+          position: stats.generalStatistics.positionId
+            ? (positionMeta(stats.generalStatistics.positionId)?.short ?? null)
+            : null,
+          goals: stats.goalStatistics.goalsScoredTotal ?? 0,
+          assists: stats.goalStatistics.assists ?? 0,
+          yellow: stats.cardStatistics.yellowCardNet ?? 0,
+          minutes: stats.playingTimeStatistics.playedMinutes,
+        };
+        const list = groups.get(gi.competitionId);
+        if (list) list.push(row);
+        else groups.set(gi.competitionId, [row]);
+      }
+      return {
+        seasonId: sid,
+        label: games[0]?.gameInformation.season.display ?? String(sid),
+        groups: [...groups.entries()]
+          .map(([competitionId, rows]) => ({
+            competitionId,
+            name: compNames.get(competitionId) ?? competitionId,
+            rows: rows.sort((a, b) => (a.matchDay ?? 0) - (b.matchDay ?? 0)),
+          }))
+          .sort((a, b) => b.rows.length - a.rows.length),
+      };
+    });
+
+    return {
+      positions: [...byPosition.values()].sort((a, b) => b.games - a.games),
+      seasons,
+    };
+  });
+}
+
+export function searchAll(q: string): Promise<SearchResults> {
+  const query = q.trim().slice(0, 60);
+  return cached(`search:${query.toLowerCase()}`, HOUR / 4, async () =>
+    parseSearch(
+      await tmHtml(
+        `/schnellsuche/ergebnis/schnellsuche?query=${encodeURIComponent(query)}`,
+      ),
+    ),
+  );
+}
+
+export function getLatestTransfers(): Promise<TransferRow[]> {
+  return cached('latesttransfers', HOUR / 2, async () =>
+    parseTransfers(await tmHtml('/statistik/neuestetransfers')),
+  );
+}
+
+export function getTransferRecords(): Promise<TransferRow[]> {
+  return cached('transferrecords', 24 * HOUR, async () =>
+    parseTransfers(await tmHtml('/transfers/transferrekorde/statistik')),
+  );
+}

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 200" width="920" height="200">
+  
+  <rect x="0" y="20" width="160" height="160" rx="45" fill="#C8F04B"></rect>
+  <path d="M60 142.5 V65 h32.5 a26.25 26.25 0 0 1 0 52.5 h-32.5" fill="none" stroke="#131711" stroke-width="16.25" stroke-linecap="round" stroke-linejoin="round"></path>
+  <text x="196" y="146" font-family="&#39;Bricolage Grotesque&#39;,&#39;Archivo&#39;,sans-serif" font-weight="800" font-size="104" letter-spacing="-3">
+    <tspan fill="#131711">players</tspan><tspan fill="#0E4632">place</tspan>
+  </text>
+</svg>

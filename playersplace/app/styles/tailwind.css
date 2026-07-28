@@ -1,0 +1,87 @@
+@import 'tailwindcss';
+
+/* Design tokens — handoff PlayersPlace (design_handoff_playersplace/README.md) */
+@theme {
+  --color-pitch: #0e4632;
+  --color-lime: #c8f04b;
+  --color-limehover: #d6f86b;
+  --color-ink: #131711;
+  --color-paper: #f3f4ef;
+  --color-card: #ffffff;
+  --color-line: #e4e6dc;
+  --color-innerline: #eef0e6;
+  --color-hoverrow: #fafbf6;
+  --color-soft: #f6f7f1;
+  --color-chipbg: #e7e9df;
+  --color-menuactive: #eaeddf;
+  --color-muted: #70776b;
+  --color-faint: #9aa093;
+  --color-up: #189a5a;
+  --color-upbg: #e6f4e9;
+  --color-down: #de4a32;
+  --color-downbg: #fdece8;
+  --color-warm: #e07b12;
+  --color-warmbg: #fbeee0;
+  --color-avatarbg: #e9ebe0;
+  --color-addash: #d5d8cb;
+  --color-linkhover: #0a3325;
+
+  --font-display: 'Bricolage Grotesque', sans-serif;
+  --font-sans: 'Archivo', sans-serif;
+  /* wordmark do logo — definida no pacote oficial (oficial-logo/LEIA-ME.txt) */
+  --font-brand: 'Space Grotesk', sans-serif;
+
+  /* cores do pacote de logo, usadas só na marca */
+  --color-brandlime: #c5f04c;
+  --color-brandink: #0f0f0f;
+  --color-brandcream: #f6f4ed;
+  --color-brandgreen: #2f7a1f;
+
+  --radius-card: 16px;
+  --radius-btn: 12px;
+}
+
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+  }
+  ::selection {
+    background-color: var(--color-lime);
+    color: var(--color-ink);
+  }
+}
+
+@keyframes ppPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@keyframes ppIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility pp-in {
+  animation: ppIn 0.3s ease both;
+}
+
+@utility pp-pulse {
+  animation: ppPulse 1.4s infinite;
+}

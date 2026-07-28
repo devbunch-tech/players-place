@@ -1,0 +1,17 @@
+PLAYERSPLACE — PACOTE DE LOGO V1.0 (JUL 2026)
+
+SVG/ vetores (editar no Figma/Illustrator)
+PNG/ rasters em alta (usar direto)
+
+CORES
+Preto Campo  #0F0F0F
+Lima Eletrico #C5F04C
+Creme Arquibancada #F6F4ED
+Verde Gramado #2F7A1F
+
+REGRAS RAPIDAS
+- Area de respiro: 2x o diametro da bola, em todos os lados
+- Tamanho minimo: lockup 120px/30mm, simbolo 24px/8mm
+- Lima nunca como texto sobre fundo claro
+- Fonte do wordmark: Space Grotesk Bold (Google Fonts, OFL)
+- Dados/labels: IBM Plex Mono
