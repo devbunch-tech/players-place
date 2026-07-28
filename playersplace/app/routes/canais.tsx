@@ -1,5 +1,14 @@
-import {Link} from 'react-router';
+import {Form, Link} from 'react-router';
 import type {Route} from './+types/canais';
+import {productConfig} from '~/lib/commerce';
+
+export async function loader({request, context}: Route.LoaderArgs) {
+  return {
+    videoAvailable: productConfig(context.env, 'video').available,
+    canalAvailable: productConfig(context.env, 'canal').available,
+    erro: new URL(request.url).searchParams.get('erro'),
+  };
+}
 
 export const meta: Route.MetaFunction = () => [
   {title: 'Para canais de YouTube · Players Place'},
@@ -20,7 +29,8 @@ const BENEFITS = [
 const MAILTO =
   'mailto:canais@playersplace.com.br?subject=Quero%20publicar%20v%C3%ADdeo-an%C3%A1lise';
 
-export default function Canais() {
+export default function Canais({loaderData}: Route.ComponentProps) {
+  const {videoAvailable, canalAvailable, erro} = loaderData;
   return (
     <div className="mx-auto max-w-3xl pp-in">
       <span className="inline-block rounded-md bg-lime px-2.5 py-1 text-[11px] font-extrabold tracking-widest text-ink">
@@ -63,12 +73,24 @@ export default function Canais() {
             Um vídeo, um jogador. Ideal para testar o espaço com sua análise
             mais forte.
           </p>
-          <a
-            href={MAILTO}
-            className="mt-4 flex h-11 items-center justify-center rounded-btn border border-line text-sm font-bold transition-colors hover:bg-hoverrow"
-          >
-            Publicar um vídeo
-          </a>
+          {videoAvailable ? (
+            <Form method="post" action="/comprar" className="mt-4">
+              <input type="hidden" name="produto" value="video" />
+              <button
+                type="submit"
+                className="flex h-11 w-full items-center justify-center rounded-btn border border-line text-sm font-bold transition-colors hover:bg-hoverrow"
+              >
+                Publicar um vídeo
+              </button>
+            </Form>
+          ) : (
+            <a
+              href={MAILTO}
+              className="mt-4 flex h-11 items-center justify-center rounded-btn border border-line text-sm font-bold transition-colors hover:bg-hoverrow"
+            >
+              Publicar um vídeo
+            </a>
+          )}
         </div>
 
         <div className="flex flex-col rounded-card bg-pitch p-5 text-white">
@@ -89,12 +111,31 @@ export default function Canais() {
             <strong className="text-white">prioridade de exibição</strong> nas
             páginas. Cancele quando quiser.
           </p>
-          <a
-            href={MAILTO}
-            className="mt-4 flex h-11 items-center justify-center rounded-btn bg-lime text-sm font-bold text-ink transition-colors hover:bg-limehover"
-          >
-            Assinar como canal
-          </a>
+          {canalAvailable ? (
+            <Form method="post" action="/comprar" className="mt-4">
+              <input type="hidden" name="produto" value="canal" />
+              <button
+                type="submit"
+                className="flex h-11 w-full items-center justify-center rounded-btn bg-lime text-sm font-bold text-ink transition-colors hover:bg-limehover"
+              >
+                Assinar como canal
+              </button>
+            </Form>
+          ) : (
+            <a
+              href={MAILTO}
+              className="mt-4 flex h-11 items-center justify-center rounded-btn bg-lime text-sm font-bold text-ink transition-colors hover:bg-limehover"
+            >
+              Assinar como canal
+            </a>
+          )}
+
+          {erro === 'carrinho' ? (
+            <p className="mt-3 text-xs font-semibold text-white">
+              Não foi possível abrir o checkout agora. Tente de novo em
+              instantes.
+            </p>
+          ) : null}
         </div>
       </div>
 

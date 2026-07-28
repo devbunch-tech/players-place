@@ -36,13 +36,24 @@ export async function createHydrogenRouterContext(
    * Open a cache instance in the worker and a custom session instance.
    * Em dev local (vite puro, sem o CLI da Shopify) o .env não é injetado
    * no worker — usamos um segredo de desenvolvimento como fallback.
+   *
+   * Em produção esse fallback não pode valer: ele vai no bundle, é público,
+   * e com ele qualquer um forja um cookie de sessão assinado. Melhor a
+   * aplicação recusar-se a subir do que rodar com sessão falsificável.
    */
-  const sessionSecret = env?.SESSION_SECRET ?? 'playersplace-dev-secret';
+  const sessionSecret = env?.SESSION_SECRET;
+  if (!sessionSecret && process.env.NODE_ENV === 'production') {
+    throw new Error(
+      'SESSION_SECRET não está definido. Cadastre a variável de ambiente ' +
+        'na storefront (Shopify admin → Hydrogen → Storefront settings → ' +
+        'Environments and variables) antes de fazer o deploy.',
+    );
+  }
 
   const waitUntil = executionContext.waitUntil.bind(executionContext);
   const [cache, session] = await Promise.all([
     caches.open('hydrogen'),
-    AppSession.init(request, [sessionSecret]),
+    AppSession.init(request, [sessionSecret ?? 'playersplace-dev-secret']),
   ]);
 
   const hydrogenContext = createHydrogenContext(

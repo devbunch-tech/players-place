@@ -14,6 +14,7 @@ import type {Route} from './+types/root';
 import favicon from '~/assets/favicon.svg';
 import tailwindStyles from '~/styles/tailwind.css?url';
 import {Header, Footer} from '~/components/Shell';
+import {resolveProState} from '~/lib/pro';
 
 export type RootLoader = typeof loader;
 
@@ -47,10 +48,10 @@ export function links() {
   ];
 }
 
-export async function loader({request}: Route.LoaderArgs) {
-  const cookies = request.headers.get('Cookie') ?? '';
-  const pro = /(?:^|;\s*)pp_pro=1(?:;|$)/.test(cookies);
-  return {pro};
+export async function loader({context}: Route.LoaderArgs) {
+  // O AdSlot e a página /pro leem daqui. A fonte de verdade é a assinatura
+  // na Shopify, não mais um cookie — ver app/lib/pro.ts.
+  return resolveProState(context);
 }
 
 export function Layout({children}: {children?: React.ReactNode}) {

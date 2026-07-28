@@ -9,3 +9,4 @@ node_modules
 .shopify
 .react-router
 h2_deploy_log.json
+tsconfig.tsbuildinfo

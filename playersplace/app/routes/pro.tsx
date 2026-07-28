@@ -1,24 +1,17 @@
-import {Form, Link, redirect} from 'react-router';
+import {Form, Link} from 'react-router';
 import type {Route} from './+types/pro';
+import {resolveProState} from '~/lib/pro';
+import {productConfig} from '~/lib/commerce';
 
 export const meta: Route.MetaFunction = () => [
   {title: 'Players Place PRO — sem anúncios por R$ 5/mês'},
 ];
 
-const COOKIE_ON = 'pp_pro=1; Path=/; Max-Age=2592000; SameSite=Lax';
-const COOKIE_OFF = 'pp_pro=; Path=/; Max-Age=0; SameSite=Lax';
-
-export async function loader({request}: Route.LoaderArgs) {
-  const pro = /(?:^|;\s*)pp_pro=1(?:;|$)/.test(request.headers.get('Cookie') ?? '');
-  return {pro};
-}
-
-export async function action({request}: Route.ActionArgs) {
-  const form = await request.formData();
-  const intent = form.get('intent');
-  return redirect('/pro', {
-    headers: {'Set-Cookie': intent === 'cancel' ? COOKIE_OFF : COOKIE_ON},
-  });
+export async function loader({request, context}: Route.LoaderArgs) {
+  const {pro, loggedIn} = await resolveProState(context);
+  const {available} = productConfig(context.env, 'pro');
+  const erro = new URL(request.url).searchParams.get('erro');
+  return {pro, loggedIn, available, erro};
 }
 
 const BENEFITS = [
@@ -29,7 +22,7 @@ const BENEFITS = [
 ];
 
 export default function Pro({loaderData}: Route.ComponentProps) {
-  const {pro} = loaderData;
+  const {pro, loggedIn, available, erro} = loaderData;
   return (
     <div className="mx-auto max-w-3xl pp-in">
       <span className="inline-block rounded-md bg-lime px-2.5 py-1 text-[11px] font-extrabold tracking-widest text-ink">
@@ -69,42 +62,66 @@ export default function Pro({loaderData}: Route.ComponentProps) {
           <p className="mt-2 text-xs text-white/60">
             Cancele quando quiser.
           </p>
-          <Form method="post" className="mt-4">
-            {pro ? (
+          {pro ? (
+            <p className="mt-4 rounded-btn border border-lime/40 bg-lime/10 p-3 text-xs font-semibold text-lime">
+              ✓ Assinatura ativa — anúncios ocultos em toda a plataforma.
+            </p>
+          ) : (
+            <Form method="post" action="/comprar" className="mt-4">
+              <input type="hidden" name="produto" value="pro" />
               <button
                 type="submit"
-                name="intent"
-                value="cancel"
-                className="flex h-11 w-full items-center justify-center rounded-btn border border-white/25 text-sm font-bold text-white transition-colors hover:bg-white/10"
-              >
-                Cancelar assinatura
-              </button>
-            ) : (
-              <button
-                type="submit"
-                name="intent"
-                value="activate"
-                className="flex h-11 w-full items-center justify-center rounded-btn bg-lime text-sm font-bold text-ink transition-colors hover:bg-limehover"
+                disabled={!available}
+                className="flex h-11 w-full items-center justify-center rounded-btn bg-lime text-sm font-bold text-ink transition-colors hover:bg-limehover disabled:cursor-not-allowed disabled:opacity-40"
               >
                 Assinar agora
               </button>
-            )}
-          </Form>
-          {pro ? (
-            <p className="mt-3 text-xs font-semibold text-lime">
-              ✓ PRO ativo nesta sessão — anúncios ocultos.
+            </Form>
+          )}
+
+          {!pro && !available ? (
+            <p className="mt-3 text-xs text-white/60">
+              Assinatura ainda não disponível. Estamos finalizando a
+              configuração do pagamento.
             </p>
           ) : null}
+
+          {erro === 'carrinho' ? (
+            <p className="mt-3 text-xs font-semibold text-white">
+              Não foi possível abrir o checkout agora. Tente de novo em
+              instantes.
+            </p>
+          ) : null}
+
+          {pro ? (
+            <Form method="post" action="/account/logout" className="mt-3">
+              <button
+                type="submit"
+                className="text-xs font-semibold text-white/60 underline-offset-2 hover:underline"
+              >
+                Sair da conta
+              </button>
+            </Form>
+          ) : loggedIn ? null : (
+            <p className="mt-3 text-xs text-white/60">
+              Já assina?{' '}
+              <Link
+                to="/account/login"
+                className="font-semibold text-lime underline-offset-2 hover:underline"
+              >
+                Entrar na sua conta
+              </Link>
+            </p>
+          )}
         </div>
       </div>
 
       <div className="mt-8 rounded-card border border-dashed border-addash bg-card p-5 text-[13px] leading-relaxed text-muted">
-        <strong className="text-ink">Como funciona no ambiente local:</strong>{' '}
-        o botão acima simula a assinatura gravando um cookie no seu navegador
-        (sem cobrança). Em produção, o pagamento de R$ 5/mês será processado
-        pelo checkout da Shopify (produto de assinatura) e a venda de espaços
-        publicitários para anunciantes também será gerenciada pela loja — o
-        cookie passa a ser emitido após a confirmação do pagamento.
+        <strong className="text-ink">Como funciona:</strong> o pagamento de
+        R$ 5/mês é processado pelo checkout da Shopify. Para assinar é preciso
+        entrar com uma conta de cliente da loja — é ela que guarda a
+        assinatura e libera a navegação sem anúncios em qualquer dispositivo
+        onde você entrar. O cancelamento é feito pelo portal da conta.
       </div>
 
       <div className="mt-6 rounded-card border border-line bg-card p-5">
