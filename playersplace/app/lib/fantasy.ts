@@ -69,21 +69,20 @@ export function pontuarEscalacao(picks: PickPontuavel[]): number {
 
 export interface Formacao {
   code: string;
-  defensores: number;
-  meias: number;
-  atacantes: number;
+  /** jogadores de linha, da defesa para o ataque — "4-2-3-1" é [4,2,3,1] */
+  linhas: number[];
 }
 
 /** o goleiro é sempre 1 e não entra no código da formação */
 export const GOLEIROS = 1;
 
 export const FORMACOES: Formacao[] = [
-  {code: '4-3-3', defensores: 4, meias: 3, atacantes: 3},
-  {code: '4-4-2', defensores: 4, meias: 4, atacantes: 2},
-  {code: '4-2-3-1', defensores: 4, meias: 5, atacantes: 1},
-  {code: '3-5-2', defensores: 3, meias: 5, atacantes: 2},
-  {code: '3-4-3', defensores: 3, meias: 4, atacantes: 3},
-  {code: '5-3-2', defensores: 5, meias: 3, atacantes: 2},
+  {code: '4-3-3', linhas: [4, 3, 3]},
+  {code: '4-4-2', linhas: [4, 4, 2]},
+  {code: '4-2-3-1', linhas: [4, 2, 3, 1]},
+  {code: '3-5-2', linhas: [3, 5, 2]},
+  {code: '3-4-3', linhas: [3, 4, 3]},
+  {code: '5-3-2', linhas: [5, 3, 2]},
 ];
 
 export function acharFormacao(code: string): Formacao | null {
@@ -92,7 +91,63 @@ export function acharFormacao(code: string): Formacao | null {
 
 /** total de jogadores de uma formação — sempre 11 */
 export function tamanhoEscalacao(f: Formacao): number {
-  return GOLEIROS + f.defensores + f.meias + f.atacantes;
+  return GOLEIROS + f.linhas.reduce((a, b) => a + b, 0);
+}
+
+export interface PosicaoCampo {
+  /** 1..11, na mesma ordem usada em fantasy_picks.slot */
+  slot: number;
+  /** porcentagem da largura do campo */
+  x: number;
+  /** porcentagem da altura; 0 é o ataque, 100 é o próprio gol */
+  y: number;
+  /** GOL, ZAG, VOL, MEI, ATA */
+  rotulo: string;
+}
+
+// o gol fica embaixo e o ataque em cima, como na página do jogador
+const Y_GOLEIRO = 90;
+const Y_PRIMEIRA_LINHA = 74;
+const Y_ULTIMA_LINHA = 18;
+
+function rotuloDaLinha(indice: number, total: number): string {
+  if (indice === 0) return 'ZAG';
+  if (indice === total - 1) return 'ATA';
+  // com 4 linhas, a segunda é de volantes
+  return total >= 4 && indice === 1 ? 'VOL' : 'MEI';
+}
+
+/**
+ * Onde cada vaga fica desenhada no campo.
+ *
+ * O slot 1 é sempre o goleiro; as demais seguem a ordem das linhas, o que
+ * mantém a numeração estável quando o usuário troca de formação — quem já
+ * estava na vaga 2 continua na vaga 2.
+ */
+export function posicoesDaFormacao(f: Formacao): PosicaoCampo[] {
+  const posicoes: PosicaoCampo[] = [
+    {slot: 1, x: 50, y: Y_GOLEIRO, rotulo: 'GOL'},
+  ];
+
+  const nLinhas = f.linhas.length;
+  const passo =
+    nLinhas > 1 ? (Y_PRIMEIRA_LINHA - Y_ULTIMA_LINHA) / (nLinhas - 1) : 0;
+
+  let slot = 2;
+  f.linhas.forEach((qtd, i) => {
+    const y = nLinhas > 1 ? Y_PRIMEIRA_LINHA - i * passo : 46;
+    for (let j = 0; j < qtd; j++) {
+      posicoes.push({
+        slot: slot++,
+        // distribui na horizontal deixando margem nas laterais
+        x: ((j + 1) * 100) / (qtd + 1),
+        y,
+        rotulo: rotuloDaLinha(i, nLinhas),
+      });
+    }
+  });
+
+  return posicoes;
 }
 
 // ---------------------------------------------------------------------------

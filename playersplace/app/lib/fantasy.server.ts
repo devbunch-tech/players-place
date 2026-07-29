@@ -23,6 +23,7 @@ export interface PickSalvo {
   clubId: string | null;
   clubName: string | null;
   position: string | null;
+  photo: string | null;
   predGoals: number;
   predAssists: number;
 }
@@ -117,6 +118,7 @@ export async function buscarEscalacao(
       clubId: p.club_id,
       clubName: p.club_name,
       position: p.position,
+      photo: p.player_photo,
       predGoals: p.pred_goals,
       predAssists: p.pred_assists,
     })),
@@ -174,6 +176,7 @@ export async function salvarEscalacao(
       club_id: p.clubId,
       club_name: p.clubName,
       position: p.position,
+      player_photo: p.photo,
       pred_goals: p.predGoals,
       pred_assists: p.predAssists,
     })),
@@ -438,6 +441,7 @@ export async function resumoDoJogador(
         clubId: p.club_id,
         clubName: p.club_name,
         position: p.position,
+        photo: p.player_photo,
         predGoals: p.pred_goals,
         predAssists: p.pred_assists,
         actualGoals: p.actual_goals,

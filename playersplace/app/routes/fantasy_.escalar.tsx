@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 import {Form, Link, redirect, useFetcher} from 'react-router';
 import type {Route} from './+types/fantasy_.escalar';
 import {getLeagueOverview, getRodadaAtual} from '~/lib/tm';
@@ -8,6 +8,7 @@ import {
   FORMACOES,
   MAX_PALPITE,
   acharFormacao,
+  posicoesDaFormacao,
   tamanhoEscalacao,
   validarEscalacao,
 } from '~/lib/fantasy';
@@ -18,6 +19,7 @@ import {
   salvarEscalacao,
   type PickSalvo,
 } from '~/lib/fantasy.server';
+import {FantasyPitch, type VagaCampo} from '~/components/FantasyPitch';
 
 const LIGA = 'BRA1';
 
@@ -123,59 +125,52 @@ export async function action({request, context}: Route.ActionArgs) {
   return r.ok ? {ok: true} : {erro: r.erro ?? 'Falha ao salvar.'};
 }
 
-interface Slot {
+interface Vaga {
   playerId: string;
   playerName: string;
   clubId: string | null;
   clubName: string | null;
   position: string | null;
+  photo: string | null;
   predGoals: number;
   predAssists: number;
 }
-
-const vazio = (): Slot => ({
-  playerId: '',
-  playerName: '',
-  clubId: null,
-  clubName: null,
-  position: null,
-  predGoals: 0,
-  predAssists: 0,
-});
 
 /** +/- grandes o suficiente para o dedo, número no meio */
 function Stepper({
   label,
   value,
   onChange,
+  disabled,
 }: {
   label: string;
   value: number;
   onChange: (v: number) => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-10 text-[11px] font-bold tracking-wide text-faint uppercase">
+      <span className="w-12 text-[11px] font-bold tracking-wide text-faint uppercase">
         {label}
       </span>
       <button
         type="button"
         aria-label={`Diminuir ${label}`}
         onClick={() => onChange(Math.max(0, value - 1))}
-        className="flex h-9 w-9 items-center justify-center rounded-btn border border-line text-lg font-bold disabled:opacity-30"
-        disabled={value <= 0}
+        disabled={disabled || value <= 0}
+        className="flex h-10 w-10 items-center justify-center rounded-btn border border-line text-lg font-bold disabled:opacity-30"
       >
         −
       </button>
-      <span className="w-6 text-center text-sm font-extrabold tabular-nums">
+      <span className="w-7 text-center text-base font-extrabold tabular-nums">
         {value}
       </span>
       <button
         type="button"
         aria-label={`Aumentar ${label}`}
         onClick={() => onChange(Math.min(MAX_PALPITE, value + 1))}
-        className="flex h-9 w-9 items-center justify-center rounded-btn border border-line text-lg font-bold disabled:opacity-30"
-        disabled={value >= MAX_PALPITE}
+        disabled={disabled || value >= MAX_PALPITE}
+        className="flex h-10 w-10 items-center justify-center rounded-btn border border-line text-lg font-bold disabled:opacity-30"
       >
         +
       </button>
@@ -185,33 +180,73 @@ function Stepper({
 
 export default function Escalar({loaderData, actionData}: Route.ComponentProps) {
   const {round, deadlineISO, clubes, escalacao, season} = loaderData;
-  const [formacao, setFormacao] = useState(escalacao?.formation ?? '4-3-3');
-  const total = tamanhoEscalacao(acharFormacao(formacao) ?? FORMACOES[0]);
 
-  const [slots, setSlots] = useState<Slot[]>(() => {
-    const base = Array.from({length: total}, vazio);
+  const [formacaoCode, setFormacaoCode] = useState(
+    escalacao?.formation ?? '4-3-3',
+  );
+  const formacao = acharFormacao(formacaoCode) ?? FORMACOES[0];
+  const total = tamanhoEscalacao(formacao);
+
+  // indexado por slot (1..11): trocar de formação preserva quem já foi escolhido
+  const [vagas, setVagas] = useState<Record<number, Vaga>>(() => {
+    const inicial: Record<number, Vaga> = {};
     escalacao?.picks.forEach((p) => {
-      if (p.slot - 1 < base.length) base[p.slot - 1] = {...p};
+      inicial[p.slot] = {
+        playerId: p.playerId,
+        playerName: p.playerName,
+        clubId: p.clubId,
+        clubName: p.clubName,
+        position: p.position,
+        photo: p.photo,
+        predGoals: p.predGoals,
+        predAssists: p.predAssists,
+      };
     });
-    return base;
+    return inicial;
   });
 
-  // trocar de formação mantém quem já foi escolhido, só ajusta o tamanho
-  useEffect(() => {
-    setSlots((atual) => {
-      if (atual.length === total) return atual;
-      if (atual.length > total) return atual.slice(0, total);
-      return [...atual, ...Array.from({length: total - atual.length}, vazio)];
-    });
-  }, [total]);
+  const [slotAtivo, setSlotAtivo] = useState<number | null>(null);
+  const [trocando, setTrocando] = useState(false);
 
-  const [abrindo, setAbrindo] = useState<number | null>(null);
-  const preenchidos = slots.filter((s) => s.playerId).length;
   const prazo = deadlineISO ? new Date(deadlineISO) : null;
   const encerrado = prazo ? Date.now() >= prazo.getTime() : false;
 
-  const atualizar = (i: number, patch: Partial<Slot>) =>
-    setSlots((s) => s.map((x, j) => (j === i ? {...x, ...patch} : x)));
+  const posicoes = posicoesDaFormacao(formacao);
+  const preenchidos = posicoes.filter((p) => vagas[p.slot]).length;
+  const jaEscalados = useMemo(
+    () =>
+      posicoes.map((p) => vagas[p.slot]?.playerId).filter(Boolean) as string[],
+    [posicoes, vagas],
+  );
+
+  const posicaoAtiva = posicoes.find((p) => p.slot === slotAtivo) ?? null;
+  const vagaAtiva = slotAtivo ? vagas[slotAtivo] : undefined;
+
+  // vaga vazia já abre no seletor; vaga preenchida abre nos palpites
+  useEffect(() => {
+    setTrocando(!vagaAtiva);
+  }, [slotAtivo, vagaAtiva]);
+
+  const atualizar = (slot: number, patch: Partial<Vaga>) =>
+    setVagas((v) => ({...v, [slot]: {...v[slot], ...patch}}));
+
+  const paraEnvio = posicoes
+    .filter((p) => vagas[p.slot])
+    .map((p) => ({...vagas[p.slot], slot: p.slot}));
+
+  const vagasCampo: Record<number, VagaCampo | undefined> = {};
+  for (const p of posicoes) {
+    const v = vagas[p.slot];
+    if (v) {
+      vagasCampo[p.slot] = {
+        playerId: v.playerId,
+        playerName: v.playerName,
+        photo: v.photo,
+        predGoals: v.predGoals,
+        predAssists: v.predAssists,
+      };
+    }
+  }
 
   return (
     <div className="mx-auto max-w-2xl pp-in">
@@ -263,9 +298,12 @@ export default function Escalar({loaderData, actionData}: Route.ComponentProps) 
               key={f.code}
               type="button"
               disabled={encerrado}
-              onClick={() => setFormacao(f.code)}
+              onClick={() => {
+                setFormacaoCode(f.code);
+                setSlotAtivo(null);
+              }}
               className={`h-9 shrink-0 rounded-full px-4 text-[13px] font-bold transition-colors disabled:opacity-40 ${
-                formacao === f.code
+                formacaoCode === f.code
                   ? 'bg-ink text-white'
                   : 'border border-line bg-card text-muted'
               }`}
@@ -276,100 +314,125 @@ export default function Escalar({loaderData, actionData}: Route.ComponentProps) 
         </div>
       </div>
 
-      {/* slots */}
-      <div className="mt-6 space-y-3">
-        {slots.map((s, i) => (
-          <div key={i} className="rounded-card border border-line bg-card p-4">
-            <div className="flex items-center gap-3">
-              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-soft text-xs font-extrabold tabular-nums">
-                {i + 1}
-              </span>
-              <button
-                type="button"
-                disabled={encerrado}
-                onClick={() => setAbrindo(abrindo === i ? null : i)}
-                className="min-w-0 flex-1 text-left disabled:opacity-40"
-              >
-                {s.playerId ? (
-                  <>
-                    <span className="block truncate text-sm font-bold">
-                      {s.playerName}
-                    </span>
-                    <span className="block truncate text-xs text-faint">
-                      {s.clubName} · {s.position}
-                    </span>
-                  </>
-                ) : (
-                  <span className="text-sm font-semibold text-muted">
-                    Escolher jogador
+      {/* campo */}
+      <div className="mt-4 rounded-card border border-line bg-card p-4">
+        <FantasyPitch
+          formacao={formacao}
+          vagas={vagasCampo}
+          slotAtivo={slotAtivo}
+          onSelecionar={(s) => setSlotAtivo(slotAtivo === s ? null : s)}
+          desabilitado={encerrado}
+        />
+        <p className="mt-3 text-center text-[13px] font-semibold text-muted">
+          {preenchidos}/{total} escalados
+          {slotAtivo ? '' : ' · toque numa posição para escolher'}
+        </p>
+      </div>
+
+      {/* editor da vaga selecionada */}
+      {posicaoAtiva ? (
+        <div className="mt-4 rounded-card border border-line bg-card p-4">
+          <div className="flex items-center gap-3">
+            <span className="rounded-full bg-chipbg px-3 py-1 text-[11px] font-extrabold tracking-wide">
+              {posicaoAtiva.rotulo} · vaga {posicaoAtiva.slot}
+            </span>
+            <button
+              type="button"
+              onClick={() => setSlotAtivo(null)}
+              className="ml-auto text-xs font-semibold text-faint hover:text-ink"
+            >
+              fechar
+            </button>
+          </div>
+
+          {vagaAtiva && !trocando ? (
+            <>
+              <div className="mt-3 flex items-center gap-3">
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-bold">
+                    {vagaAtiva.playerName}
                   </span>
-                )}
-              </button>
-              {s.playerId ? (
+                  <span className="block truncate text-xs text-faint">
+                    {vagaAtiva.clubName} · {vagaAtiva.position}
+                  </span>
+                </span>
                 <button
                   type="button"
                   disabled={encerrado}
-                  onClick={() => atualizar(i, vazio())}
-                  aria-label="Remover jogador"
+                  onClick={() => setTrocando(true)}
+                  className="shrink-0 text-xs font-semibold text-pitch hover:underline disabled:opacity-40"
+                >
+                  trocar
+                </button>
+                <button
+                  type="button"
+                  disabled={encerrado}
+                  onClick={() =>
+                    setVagas((v) => {
+                      const copia = {...v};
+                      delete copia[posicaoAtiva.slot];
+                      return copia;
+                    })
+                  }
                   className="shrink-0 text-xs font-semibold text-faint hover:text-down disabled:opacity-40"
                 >
                   remover
                 </button>
-              ) : null}
-            </div>
+              </div>
 
-            {s.playerId && !encerrado ? (
-              <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 border-t border-innerline pt-3">
+              <div className="mt-3 flex flex-wrap gap-x-6 gap-y-3 border-t border-innerline pt-3">
                 <Stepper
                   label="Gols"
-                  value={s.predGoals}
-                  onChange={(v) => atualizar(i, {predGoals: v})}
+                  value={vagaAtiva.predGoals}
+                  disabled={encerrado}
+                  onChange={(v) => atualizar(posicaoAtiva.slot, {predGoals: v})}
                 />
                 <Stepper
                   label="Assist."
-                  value={s.predAssists}
-                  onChange={(v) => atualizar(i, {predAssists: v})}
+                  value={vagaAtiva.predAssists}
+                  disabled={encerrado}
+                  onChange={(v) =>
+                    atualizar(posicaoAtiva.slot, {predAssists: v})
+                  }
                 />
               </div>
-            ) : null}
-
-            {abrindo === i ? (
-              <SeletorJogador
-                clubes={clubes}
-                jaEscalados={slots.map((x) => x.playerId).filter(Boolean)}
-                onEscolher={(p) => {
-                  atualizar(i, {
+            </>
+          ) : (
+            <SeletorJogador
+              clubes={clubes}
+              jaEscalados={jaEscalados}
+              onEscolher={(p) => {
+                setVagas((v) => ({
+                  ...v,
+                  [posicaoAtiva.slot]: {
                     playerId: p.id,
                     playerName: p.name,
                     clubId: p.clubId,
                     clubName: p.clubName,
                     position: p.position,
-                  });
-                  setAbrindo(null);
-                }}
-              />
-            ) : null}
-          </div>
-        ))}
-      </div>
+                    photo: p.photo,
+                    predGoals: v[posicaoAtiva.slot]?.predGoals ?? 0,
+                    predAssists: v[posicaoAtiva.slot]?.predAssists ?? 0,
+                  },
+                }));
+                setTrocando(false);
+              }}
+            />
+          )}
+        </div>
+      ) : null}
 
       <div className="mt-4 rounded-card border border-dashed border-addash bg-card p-4 text-[13px] leading-relaxed text-muted">
         Palpite <strong className="text-ink">0</strong> vale &ldquo;não
-        aposto&rdquo;: não soma nem tira ponto. Só número de 1 pra cima entra
-        no jogo, e vale se acertar em cheio.
+        aposto&rdquo;: não soma nem tira ponto. Só número de 1 pra cima entra no
+        jogo, e vale se acertar em cheio.
       </div>
 
       <Form method="post" className="mt-6">
-        <input type="hidden" name="formacao" value={formacao} />
+        <input type="hidden" name="formacao" value={formacaoCode} />
         <input type="hidden" name="season" value={season} />
         <input type="hidden" name="round" value={round} />
-        <input
-          type="hidden"
-          name="picks"
-          value={JSON.stringify(
-            slots.map((s, i) => ({...s, slot: i + 1})).filter((s) => s.playerId),
-          )}
-        />
+        <input type="hidden" name="picks" value={JSON.stringify(paraEnvio)} />
         <button
           type="submit"
           disabled={encerrado || preenchidos !== total}
@@ -388,6 +451,7 @@ interface JogadorEscolhido {
   id: string;
   name: string;
   position: string;
+  photo: string | null;
   clubId: string;
   clubName: string;
 }
@@ -404,7 +468,13 @@ function SeletorJogador({
   const fetcher = useFetcher<{
     clubId: string;
     clubName: string;
-    available: {id: string; name: string; position: string; number: string}[];
+    available: {
+      id: string;
+      name: string;
+      position: string;
+      number: string;
+      photo: string | null;
+    }[];
     out: {playerId: string; name: string; reason: string}[];
     erro?: string;
   }>();
@@ -456,6 +526,7 @@ function SeletorJogador({
                       id: p.id,
                       name: p.name,
                       position: p.position,
+                      photo: p.photo,
                       clubId: dados.clubId,
                       clubName: dados.clubName,
                     })

@@ -747,7 +747,7 @@ export function parseStatLeaders(html: string): StatLeaderRow[] {
       age: clean(tds[6].textContent),
       clubId: idFrom(clubLink?.getAttribute('href'), 'verein'),
       clubName: clean(clubLink?.getAttribute('title') ?? tds[7].textContent),
-      clubCrest: tds[7].querySelector('img')?.getAttribute('src') ?? null,
+      clubCrest: img(tds[7].querySelector('img')),
       games: parseInt(clean(tds[8].textContent), 10) || 0,
       value: parseInt(clean(tds[9].textContent), 10) || 0,
     });
@@ -841,7 +841,7 @@ export function parseClubFixtures(html: string): ClubMatch[] {
         opponentId: idFrom(oppLink?.getAttribute('href'), 'verein'),
         // o nome vem com o ranking colado: "Vitória (3.)"
         opponentName: clean(tds[6].textContent).replace(/\s*\(\d+\.\)\s*$/, ''),
-        opponentCrest: tds[5].querySelector('img')?.getAttribute('src') ?? null,
+        opponentCrest: img(tds[5].querySelector('img')),
         score,
         outcome: score ? outcomeFrom(score, home) : null,
       });

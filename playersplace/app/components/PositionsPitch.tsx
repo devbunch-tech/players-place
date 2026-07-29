@@ -29,7 +29,7 @@ export function PositionsPitch({
       <div className="overflow-hidden rounded-card border border-line bg-card">
         <div className="p-4">
           <div className="relative mx-auto aspect-[3/4] w-full max-w-[380px] overflow-hidden rounded-[12px] bg-pitch">
-            <Markings />
+            <PitchMarkings />
             {marks.map(({perf, meta}) => {
               const main = perf.games === most;
               return (
@@ -113,8 +113,8 @@ export function PositionsPitch({
   );
 }
 
-/** linhas do campo — puramente decorativas */
-function Markings() {
+/** linhas do campo — puramente decorativas. Reusadas pelo Game Fantasy. */
+export function PitchMarkings() {
   const line = 'absolute border-white/20';
   return (
     <div aria-hidden className="absolute inset-0">
