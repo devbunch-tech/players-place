@@ -4,6 +4,7 @@ import {getLatestTransfers, getTransferRecords} from '~/lib/tm';
 import {Avatar, Crest, EmptyNote, FeeTag} from '~/components/ui';
 import {AdSlot} from '~/components/AdSlot';
 import {ProCard} from '~/components/ProCard';
+import {SmartSearch} from '~/components/SmartSearch';
 
 export const meta: Route.MetaFunction = () => [
   {title: 'Transferências · Players Place'},
@@ -30,6 +31,8 @@ export default function Transferencias({loaderData}: Route.ComponentProps) {
         Movimentações confirmadas, direto do mercado.
       </p>
 
+      <SmartSearch className="mt-5 max-w-xl" />
+
       {/* tab segmentada */}
       <div className="mt-5 inline-flex rounded-[13px] bg-chipbg p-1">
         <Link
@@ -53,7 +56,7 @@ export default function Transferencias({loaderData}: Route.ComponentProps) {
       </div>
 
       <div className="mt-6 grid gap-10 lg:grid-cols-[1fr_340px]">
-        <div>
+        <div className="min-w-0">
           {transfers.length === 0 ? (
             <EmptyNote>
               Não foi possível carregar as transferências agora — tente
@@ -99,7 +102,7 @@ export default function Transferencias({loaderData}: Route.ComponentProps) {
             </div>
           )}
         </div>
-        <aside className="space-y-6">
+        <aside className="min-w-0 space-y-6">
           <AdSlot />
           <ProCard />
         </aside>

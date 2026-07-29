@@ -37,5 +37,21 @@ declare global {
     PP_CANAL_SELLING_PLAN_ID?: string;
     /** SKU da variante do canal — mesma razão do PP_PRO_SKU */
     PP_CANAL_SKU?: string;
+
+    /** URL do projeto Supabase, ex.: https://xxxx.supabase.co */
+    SUPABASE_URL?: string;
+    /**
+     * Chave service_role do Supabase. Ela ignora o Row Level Security, então
+     * SÓ pode ser usada em loader/action (servidor) e nunca pode ser devolvida
+     * para o navegador. Toda checagem de permissão é feita no nosso código.
+     */
+    SUPABASE_SERVICE_ROLE_KEY?: string;
+
+    /**
+     * Segredo que libera POST /api/fantasy/apurar. Sem ele a rota fica
+     * desligada: cada chamada custa ~11 requisições ao Transfermarkt, e uma
+     * rota aberta viraria vetor de abuso contra a origem.
+     */
+    FANTASY_APURACAO_TOKEN?: string;
   }
 }

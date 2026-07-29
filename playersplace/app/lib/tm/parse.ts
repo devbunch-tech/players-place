@@ -523,3 +523,330 @@ export function parseSearch(html: string): SearchResults {
   }
   return {players: players.slice(0, 12), clubs: clubs.slice(0, 8)};
 }
+
+// ---------- rodada da competição ----------
+
+/**
+ * Horário do primeiro jogo de uma rodada, lido de
+ * /-/spieltag/wettbewerb/{code}/saison_id/{season}/spieltag/{round}.
+ *
+ * A página espalha os jogos por blocos aninhados, então em vez de navegar a
+ * árvore varremos o texto atrás de pares data+hora e ficamos com o menor.
+ * Para "quando começa a rodada" isso basta e é bem mais resistente a mudança
+ * de layout do que depender da posição das células.
+ *
+ * Os horários do Transfermarkt em português são de Brasília (UTC-3, sem
+ * horário de verão desde 2019); devolvemos já em UTC.
+ */
+export function parseRoundFirstKickoff(html: string): Date | null {
+  const texto = parse(html).textContent.replace(/\s+/g, ' ');
+  const pares = [
+    ...texto.matchAll(/(\d{2})\/(\d{2})\/(\d{4})\D{0,40}?(\d{2}):(\d{2})/g),
+  ];
+  if (!pares.length) return null;
+
+  const datas = pares.map((m) => {
+    const [, dia, mes, ano, hora, min] = m;
+    return Date.UTC(
+      Number(ano),
+      Number(mes) - 1,
+      Number(dia),
+      Number(hora) + 3, // Brasília → UTC
+      Number(min),
+    );
+  });
+
+  return new Date(Math.min(...datas));
+}
+
+// ---------- apuração da rodada ----------
+
+export interface RoundMatch {
+  /** id da súmula: /spielbericht/index/spielbericht/{id} */
+  reportId: string;
+  /** "2:1" quando encerrado, "-:-" quando não */
+  score: string;
+  finished: boolean;
+}
+
+/**
+ * Jogos de uma rodada, a partir da página /-/spieltag/....
+ *
+ * A rodada só é apurada quando TODOS voltam `finished`. Um único "-:-"
+ * significa que ainda há jogo por acontecer — apurar ali daria pontuação
+ * errada para quem apostou em quem ainda vai jogar.
+ */
+export function parseRoundMatches(html: string): RoundMatch[] {
+  const root = parse(html);
+  const vistos = new Set<string>();
+  const out: RoundMatch[] = [];
+
+  for (const a of root.querySelectorAll('a[href*="spielbericht"]')) {
+    const texto = clean(a.textContent);
+    // só o link do placar interessa; os outros são nav e escudo
+    if (!/^(\d+:\d+|-:-)$/.test(texto)) continue;
+
+    const reportId = a.getAttribute('href')?.match(/spielbericht\/(\d+)/)?.[1];
+    if (!reportId || vistos.has(reportId)) continue;
+    vistos.add(reportId);
+
+    out.push({
+      reportId,
+      score: texto,
+      finished: /^\d+:\d+$/.test(texto),
+    });
+  }
+
+  return out;
+}
+
+export interface MatchEvent {
+  scorerId: string;
+  assistId: string | null;
+  /** gol contra não conta como gol do autor */
+  ownGoal: boolean;
+}
+
+/**
+ * Gols e assistências de uma súmula.
+ *
+ * Cada ação do box "Gols" traz o autor e, quando houve, a assistência. O
+ * primeiro link é o do escudo/foto e repete o autor, por isso deduplicamos
+ * antes de decidir quem é quem.
+ */
+export function parseMatchGoals(html: string): MatchEvent[] {
+  const root = parse(html);
+  const out: MatchEvent[] = [];
+
+  for (const box of root.querySelectorAll('div.box')) {
+    const titulo = clean(box.querySelector('h2')?.textContent);
+    if (!/^gols$/i.test(titulo)) continue;
+
+    for (const acao of box.querySelectorAll('.sb-aktion')) {
+      const texto = clean(acao.textContent);
+      const ids: string[] = [];
+      for (const a of acao.querySelectorAll('a[href*="/spieler/"]')) {
+        const id = idFrom(a.getAttribute('href'), 'spieler');
+        if (id && !ids.includes(id)) ids.push(id);
+      }
+      if (!ids.length) continue;
+
+      const temAssistencia = /assist[êe]ncia:/i.test(texto);
+      out.push({
+        scorerId: ids[0],
+        assistId: temAssistencia && ids[1] ? ids[1] : null,
+        ownGoal: /gol contra/i.test(texto),
+      });
+    }
+  }
+
+  return out;
+}
+
+// ---------- desfalques do clube (suspensos e lesionados) ----------
+
+export interface ClubAbsence {
+  playerId: string;
+  name: string;
+  position: string;
+  /** "Rotura do menisco", "Suspenso por cartões amarelos"… */
+  reason: string;
+  /** dd/mm/aaaa — quando começou */
+  since: string;
+  /** dd/mm/aaaa — previsão de retorno; vazio quando indefinido */
+  until: string;
+}
+
+/**
+ * Lê /-/sperrenundverletzungen/verein/{id}.
+ *
+ * A página tem dois blocos: "Suspensões e lesões" (quem está fora) e "Em
+ * risco de suspensão" (quem ainda joga, mas pendurado). Só o primeiro
+ * interessa — misturar os dois tiraria da escalação jogadores disponíveis.
+ */
+export function parseClubAbsences(html: string): ClubAbsence[] {
+  const root = parse(html);
+  const out: ClubAbsence[] = [];
+
+  for (const box of root.querySelectorAll('div.box')) {
+    const titulo = clean(box.querySelector('h2')?.textContent).toLowerCase();
+    if (!titulo.includes('suspens') || titulo.includes('risco')) continue;
+
+    const table = box.querySelector('table.items');
+    if (!table) continue;
+
+    for (const tr of table.querySelectorAll('tbody > tr')) {
+      const tds = tr.querySelectorAll('td');
+      if (tds.length < 7) continue;
+
+      const link = tr.querySelector('a[href*="/spieler/"]');
+      const playerId = idFrom(link?.getAttribute('href'), 'spieler');
+      if (!playerId) continue;
+
+      out.push({
+        playerId,
+        name: clean(link?.textContent),
+        position: clean(tds[3].textContent),
+        reason: clean(tds[5].textContent),
+        since: clean(tds[6].textContent),
+        until: clean(tds[7]?.textContent),
+      });
+    }
+  }
+
+  return out;
+}
+
+// ---------- rankings de estatística da competição ----------
+
+export interface StatLeaderRow {
+  rank: number;
+  id: string;
+  name: string;
+  position: string;
+  age: string;
+  clubId: string | null;
+  clubName: string;
+  clubCrest: string | null;
+  games: number;
+  /** a métrica do ranking: gols na lista de artilheiros, passes na de assistências */
+  value: number;
+}
+
+/**
+ * Lê as listas de artilheiros (/-/torschuetzenliste/wettbewerb/{code}) e de
+ * assistências (/-/assistliste/...). As duas usam exatamente o mesmo layout
+ * de 10 colunas, então um parser só atende as duas.
+ *
+ * Colunas: 0 rank · 3 jogador · 4 posição · 6 idade · 7 clube · 8 jogos ·
+ * 9 a métrica.
+ */
+export function parseStatLeaders(html: string): StatLeaderRow[] {
+  const root = parse(html);
+  const table = root.querySelector('table.items');
+  if (!table) return [];
+
+  const out: StatLeaderRow[] = [];
+  for (const tr of table.querySelectorAll('tbody > tr')) {
+    const tds = tr.querySelectorAll('td');
+    // linhas de dados têm 10 colunas; cabeçalhos e separadores têm menos
+    if (tds.length < 10) continue;
+
+    const playerLink = tds[3].querySelector('a[href*="/spieler/"]');
+    const id = idFrom(playerLink?.getAttribute('href'), 'spieler');
+    if (!id) continue;
+
+    const clubLink = tds[7].querySelector('a[href*="/verein/"]');
+    const rank = parseInt(clean(tds[0].textContent), 10);
+
+    out.push({
+      rank: Number.isFinite(rank) ? rank : out.length + 1,
+      id,
+      name: clean(playerLink?.textContent),
+      position: clean(tds[4].textContent),
+      age: clean(tds[6].textContent),
+      clubId: idFrom(clubLink?.getAttribute('href'), 'verein'),
+      clubName: clean(clubLink?.getAttribute('title') ?? tds[7].textContent),
+      clubCrest: tds[7].querySelector('img')?.getAttribute('src') ?? null,
+      games: parseInt(clean(tds[8].textContent), 10) || 0,
+      value: parseInt(clean(tds[9].textContent), 10) || 0,
+    });
+  }
+  return out;
+}
+
+// ---------- calendário do clube (últimos e próximos jogos) ----------
+
+export interface ClubMatch {
+  /** nome da competição (título do box) */
+  competition: string;
+  /** rodada, quando a competição usa rodadas */
+  round: string;
+  /** dd/mm/aaaa */
+  date: string;
+  /** ordenável: aaaammdd */
+  sortKey: string;
+  time: string;
+  /** true = mandante */
+  home: boolean;
+  opponentId: string | null;
+  opponentName: string;
+  opponentCrest: string | null;
+  /** "2:2" — null quando o jogo ainda não aconteceu */
+  score: string | null;
+  /** V / E / D do ponto de vista do clube consultado */
+  outcome: 'V' | 'E' | 'D' | null;
+}
+
+/** "qua 28/01/2026" → {date: "28/01/2026", sortKey: "20260128"} */
+function parseBrDate(raw: string): {date: string; sortKey: string} | null {
+  const m = clean(raw).match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!m) return null;
+  return {date: `${m[1]}/${m[2]}/${m[3]}`, sortKey: `${m[3]}${m[2]}${m[1]}`};
+}
+
+function outcomeFrom(score: string, home: boolean): 'V' | 'E' | 'D' | null {
+  const m = score.match(/^(\d+):(\d+)$/);
+  if (!m) return null;
+  // o placar do Transfermarkt vem sempre na ordem mandante:visitante
+  const mine = home ? Number(m[1]) : Number(m[2]);
+  const theirs = home ? Number(m[2]) : Number(m[1]);
+  return mine > theirs ? 'V' : mine < theirs ? 'D' : 'E';
+}
+
+/**
+ * Lê /-/spielplan/verein/{id}. A página traz uma tabela por competição, todas
+ * com as mesmas colunas: rodada, data, horário, casa/fora, ranking, escudo do
+ * adversário, adversário, formação, público e resultado.
+ */
+export function parseClubFixtures(html: string): ClubMatch[] {
+  const root = parse(html);
+  const out: ClubMatch[] = [];
+
+  for (const box of root.querySelectorAll('div.box')) {
+    const table = box.querySelector('table');
+    if (!table) continue;
+    const headers = table.querySelectorAll('th').map((th) => clean(th.textContent));
+    // só as tabelas de jogos têm estas duas colunas
+    if (!headers.includes('Adversário') || !headers.includes('Resultado')) continue;
+
+    const competition = clean(
+      box.querySelector('h2')?.textContent ??
+        box.querySelector('.content-box-headline')?.textContent,
+    );
+
+    for (const tr of table.querySelectorAll('tr')) {
+      const tds = tr.querySelectorAll('td');
+      if (tds.length < 9) continue;
+
+      const when = parseBrDate(tds[1].textContent);
+      if (!when) continue;
+
+      // C = casa, F = fora; campo neutro cai em "fora"
+      const home = clean(tds[3].textContent).toUpperCase() === 'C';
+
+      const oppLink =
+        tds[6].querySelector('a[href*="/verein/"]') ??
+        tds[5].querySelector('a[href*="/verein/"]');
+      const scoreCell = clean(tds[tds.length - 1].textContent);
+      const score = /^\d+:\d+$/.test(scoreCell) ? scoreCell : null;
+
+      out.push({
+        competition,
+        round: clean(tds[0].textContent),
+        date: when.date,
+        sortKey: when.sortKey,
+        time: clean(tds[2].textContent),
+        home,
+        opponentId: idFrom(oppLink?.getAttribute('href'), 'verein'),
+        // o nome vem com o ranking colado: "Vitória (3.)"
+        opponentName: clean(tds[6].textContent).replace(/\s*\(\d+\.\)\s*$/, ''),
+        opponentCrest: tds[5].querySelector('img')?.getAttribute('src') ?? null,
+        score,
+        outcome: score ? outcomeFrom(score, home) : null,
+      });
+    }
+  }
+
+  return out;
+}

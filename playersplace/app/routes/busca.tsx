@@ -60,7 +60,7 @@ export default function Busca({loaderData}: Route.ComponentProps) {
         </div>
       ) : (
         <div className="mt-8 grid gap-10 lg:grid-cols-[1fr_340px]">
-          <div className="space-y-10">
+          <div className="min-w-0 space-y-10">
             {results.players.length > 0 ? (
               <section>
                 <SectionTitle>Jogadores</SectionTitle>
@@ -106,7 +106,7 @@ export default function Busca({loaderData}: Route.ComponentProps) {
               </section>
             ) : null}
           </div>
-          <aside className="space-y-6">
+          <aside className="min-w-0 space-y-6">
             <AdSlot />
             <ProCard />
           </aside>

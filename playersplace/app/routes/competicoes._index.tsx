@@ -39,7 +39,7 @@ export default function Competicoes() {
       </div>
 
       <div className="mt-6 grid gap-10 lg:grid-cols-[1fr_340px]">
-        <div className="overflow-hidden rounded-card border border-line bg-card">
+        <div className="min-w-0 overflow-hidden rounded-card border border-line bg-card">
           {filtered.map((l) => (
             <Link
               key={l.code}
@@ -65,7 +65,7 @@ export default function Competicoes() {
             </Link>
           ))}
         </div>
-        <aside className="space-y-6">
+        <aside className="min-w-0 space-y-6">
           <ProCard />
           <AdSlot />
         </aside>

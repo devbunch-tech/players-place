@@ -1,11 +1,12 @@
 import {Link} from 'react-router';
 import type {Route} from './+types/clubes.$id';
 import {findLeague} from '~/lib/tm/leagues';
-import {getClub, getClubTransfers} from '~/lib/tm';
+import {getClub, getClubForm, getClubTransfers} from '~/lib/tm';
 import {euroToMillions} from '~/lib/format';
 import {Avatar, BackLink, Crest, SectionTitle, StatTile} from '~/components/ui';
 import {AdSlot} from '~/components/AdSlot';
 import {ClubSignings} from '~/components/ClubSignings';
+import {ClubFormSection} from '~/components/ClubForm';
 import {ProCard} from '~/components/ProCard';
 
 export const meta: Route.MetaFunction = ({data}) => [
@@ -14,12 +15,14 @@ export const meta: Route.MetaFunction = ({data}) => [
 
 export async function loader({params, request}: Route.LoaderArgs) {
   const season = new URL(request.url).searchParams.get('temporada');
-  const [club, transfers] = await Promise.all([
+  const [club, transfers, form] = await Promise.all([
     getClub(params.id).catch(() => null),
     getClubTransfers(
       params.id,
       /^\d+$/.test(season ?? '') ? season : null,
     ).catch(() => null),
+    // os jogos são complemento: se a origem falhar, a página do clube continua
+    getClubForm(params.id).catch(() => ({last: [], next: []})),
   ]);
   if (!club || !club.name) {
     throw new Response('Não foi possível carregar este clube agora.', {
@@ -64,11 +67,12 @@ export async function loader({params, request}: Route.LoaderArgs) {
     foreigners,
     highlights,
     transfers,
+    form,
   };
 }
 
 export default function Clube({loaderData}: Route.ComponentProps) {
-  const {id, club, league, avgAge, foreigners, highlights, transfers} =
+  const {id, club, league, avgAge, foreigners, highlights, transfers, form} =
     loaderData;
 
   return (
@@ -133,6 +137,17 @@ export default function Clube({loaderData}: Route.ComponentProps) {
 
       <div className="mt-8 grid gap-10 lg:grid-cols-[1fr_340px]">
         <div className="min-w-0 space-y-10">
+          <ClubFormSection
+            title="Últimos jogos"
+            matches={form.last}
+            empty="Nenhum jogo disputado encontrado para este clube."
+          />
+          <ClubFormSection
+            title="Próximos jogos"
+            matches={form.next}
+            empty="Nenhum jogo futuro agendado no momento."
+          />
+
           {transfers ? (
             <ClubSignings clubId={id} transfers={transfers} />
           ) : null}

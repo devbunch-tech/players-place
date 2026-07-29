@@ -1,5 +1,6 @@
-import {Form, Link} from 'react-router';
+import {Link} from 'react-router';
 import type {Route} from './+types/_index';
+import {SmartSearch} from '~/components/SmartSearch';
 import {LEAGUES} from '~/lib/tm/leagues';
 import {getGlobalTopPlayers, getLatestTransfers} from '~/lib/tm';
 import {euroToMillions, todayLabel} from '~/lib/format';
@@ -51,14 +52,7 @@ export default function Home({loaderData}: Route.ComponentProps) {
           Valores de mercado, elencos e transferências de 15 ligas — direto da
           fonte, em português.
         </p>
-        <Form method="get" action="/busca" className="mt-5 max-w-xl">
-          <input
-            type="search"
-            name="q"
-            placeholder="Buscar jogadores, clubes, ligas…"
-            className="h-12 w-full rounded-full border border-line bg-card px-5 text-[15px] shadow-none outline-none placeholder:text-faint focus:border-pitch"
-          />
-        </Form>
+        <SmartSearch className="mt-5 max-w-xl" />
       </section>
 
       {/* ligas */}
@@ -72,7 +66,10 @@ export default function Home({loaderData}: Route.ComponentProps) {
         >
           Ligas na plataforma
         </SectionTitle>
-        <div className="-mx-4 flex snap-x gap-3 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:grid-cols-3 sm:overflow-visible sm:px-0 lg:grid-cols-5">
+        {/* scroll-pl-4: sem isto o scroll-snap alinha o 1º card com a borda do
+            container e ignora o px-4, rolando 16px sozinho no carregamento —
+            os cards ficavam desalinhados do título da seção */}
+        <div className="-mx-4 flex snap-x scroll-pl-4 gap-3 overflow-x-auto px-4 pb-2 sm:mx-0 sm:grid sm:scroll-pl-0 sm:grid-cols-3 sm:overflow-visible sm:px-0 lg:grid-cols-5">
           {LEAGUES.map((l) => (
             <Link
               key={l.code}
@@ -97,7 +94,10 @@ export default function Home({loaderData}: Route.ComponentProps) {
 
       {/* conteúdo principal + sidebar */}
       <div className="grid gap-10 lg:grid-cols-[1fr_340px]">
-        <div className="space-y-10">
+        {/* min-w-0: item de grid tem min-width:auto e não encolhe abaixo da
+            largura intrínseca do conteúdo — sem isto uma tabela larga estica
+            a coluna e dá scroll horizontal na página inteira no mobile */}
+        <div className="min-w-0 space-y-10">
           <section>
             <SectionTitle
               action={
@@ -173,7 +173,7 @@ export default function Home({loaderData}: Route.ComponentProps) {
           </section>
         </div>
 
-        <aside className="space-y-6">
+        <aside className="min-w-0 space-y-6">
           <section className="rounded-card border border-line bg-card p-4">
             <div className="mb-2 flex items-end justify-between">
               <h2 className="font-display text-base font-extrabold tracking-tight">

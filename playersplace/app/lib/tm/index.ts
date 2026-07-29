@@ -6,13 +6,22 @@ import {cached, tmApiJson, tmHtml, tmJson} from './client';
 import {positionMeta} from './positions';
 import {
   parseClub,
+  parseClubAbsences,
+  parseClubFixtures,
   parseClubTransfers,
   parseLeagueOverview,
   parsePlayer,
+  parseMatchGoals,
+  parseRoundFirstKickoff,
+  parseRoundMatches,
   parseSearch,
   parseStandings,
+  parseStatLeaders,
   parseTransfers,
   parseValueRanking,
+  type ClubAbsence,
+  type ClubMatch,
+  type StatLeaderRow,
   type ClubProfile,
   type ClubTransfers,
   type LeagueOverview,
@@ -93,6 +102,232 @@ export function getClub(id: string): Promise<ClubProfile> {
   return cached(`club:${id}`, 6 * HOUR, async () =>
     parseClub(await tmHtml(`/-/startseite/verein/${id}`)),
   );
+}
+
+export interface RodadaInfo {
+  /** número da rodada corrente */
+  round: number;
+  /** saison_id do Transfermarkt: o ano de início da temporada */
+  season: number;
+  /** primeiro jogo da rodada, em UTC; null quando não foi possível ler */
+  firstKickoff: Date | null;
+}
+
+/**
+ * Rodada corrente do campeonato e quando ela começa.
+ *
+ * O Transfermarkt não publica "rodada atual" num campo próprio: inferimos
+ * pelo maior número de jogos já disputados na tabela. Com jogos atrasados a
+ * conta erra para cima, então o prazo lido aqui deve ser conferido antes de
+ * valer como fechamento oficial.
+ */
+export function getRodadaAtual(code: string): Promise<RodadaInfo> {
+  return cached(`rodada:${code}`, HOUR, async () => {
+    const standings = await getLeagueStandings(code).catch(() => []);
+    const jogos = standings.flatMap((g) => g.rows).map((r) => Number(r.played) || 0);
+    const round = jogos.length ? Math.max(...jogos) + 1 : 1;
+
+    // temporada de ano-calendário (Brasil): saison_id é o ano anterior
+    const season = new Date().getUTCFullYear() - 1;
+
+    const firstKickoff = await tmHtml(
+      `/-/spieltag/wettbewerb/${code}/saison_id/${season}/spieltag/${round}`,
+    )
+      .then(parseRoundFirstKickoff)
+      .catch(() => null);
+
+    return {round, season, firstKickoff};
+  });
+}
+
+export interface RoundResults {
+  /** todos os jogos da rodada terminaram */
+  complete: boolean;
+  jogos: number;
+  encerrados: number;
+  /** playerId → gols e assistências na rodada */
+  stats: Record<string, {goals: number; assists: number}>;
+}
+
+/**
+ * Resultado consolidado de uma rodada, para a apuração.
+ *
+ * Lê as súmulas — 1 requisição pela página da rodada + 1 por jogo (10 no
+ * Brasileirão). Fazer jogador a jogador seriam centenas, o que não caberia
+ * no limite de subrequests de uma request do worker.
+ *
+ * Sem cache de propósito: apuração precisa do estado atual, e ela roda uma
+ * vez por rodada.
+ */
+export async function getRoundResults(
+  code: string,
+  season: number,
+  round: number,
+): Promise<RoundResults> {
+  const html = await tmHtml(
+    `/-/spieltag/wettbewerb/${code}/saison_id/${season}/spieltag/${round}`,
+  );
+  const jogos = parseRoundMatches(html);
+  const encerrados = jogos.filter((j) => j.finished);
+
+  const vazio: RoundResults = {
+    complete: false,
+    jogos: jogos.length,
+    encerrados: encerrados.length,
+    stats: {},
+  };
+  if (!jogos.length || encerrados.length !== jogos.length) return vazio;
+
+  const sumulas = await Promise.all(
+    encerrados.map((j) =>
+      tmHtml(`/spielbericht/index/spielbericht/${j.reportId}`)
+        .then(parseMatchGoals)
+        .catch(() => []),
+    ),
+  );
+
+  const stats: RoundResults['stats'] = {};
+  const bump = (id: string, campo: 'goals' | 'assists') => {
+    stats[id] ??= {goals: 0, assists: 0};
+    stats[id][campo] += 1;
+  };
+
+  for (const eventos of sumulas) {
+    for (const e of eventos) {
+      // gol contra não credita gol a quem marcou
+      if (!e.ownGoal) bump(e.scorerId, 'goals');
+      if (e.assistId) bump(e.assistId, 'assists');
+    }
+  }
+
+  return {complete: true, jogos: jogos.length, encerrados: encerrados.length, stats};
+}
+
+export function getClubAbsences(id: string): Promise<ClubAbsence[]> {
+  return cached(`absences:${id}`, 2 * HOUR, async () =>
+    parseClubAbsences(await tmHtml(`/-/sperrenundverletzungen/verein/${id}`)),
+  );
+}
+
+export interface FantasyPlayer {
+  id: string;
+  name: string;
+  position: string;
+  number: string;
+  photo: string | null;
+  age: number | null;
+  value: string;
+}
+
+export interface ClubSquadAvailability {
+  clubId: string;
+  clubName: string;
+  available: FantasyPlayer[];
+  /** quem ficou de fora e por quê — mostrado ao usuário para dar contexto */
+  out: ClubAbsence[];
+}
+
+/**
+ * Elenco de um clube já sem os desfalques, para montar a escalação.
+ *
+ * Carregar de clube em clube (2 requests) em vez do campeonato inteiro (40+)
+ * é intencional: cabe no limite de subrequests do worker e, no celular,
+ * escolher dentro de um elenco é melhor que rolar 700 jogadores.
+ */
+export function getClubSquadAvailable(
+  id: string,
+): Promise<ClubSquadAvailability> {
+  return cached(`squadavail:${id}`, 2 * HOUR, async () => {
+    const [club, out] = await Promise.all([
+      getClub(id),
+      getClubAbsences(id).catch(() => [] as ClubAbsence[]),
+    ]);
+    const fora = new Set(out.map((a) => a.playerId));
+
+    return {
+      clubId: id,
+      clubName: club.name,
+      available: club.players
+        .filter((p) => !fora.has(p.id))
+        .map((p) => ({
+          id: p.id,
+          name: p.name,
+          position: p.position,
+          number: p.number,
+          photo: p.photo,
+          age: p.age,
+          value: p.value,
+        })),
+      out,
+    };
+  });
+}
+
+export interface LeagueStats {
+  scorers: StatLeaderRow[];
+  assists: StatLeaderRow[];
+}
+
+/**
+ * Estatísticas da competição: artilheiros e líderes de assistência.
+ *
+ * O Transfermarkt não publica ranking de cartões, desarmes, passes errados,
+ * defesas nem chances perdidas por competição — só gols, assistências e tempo
+ * de jogo. Essas quatro dependeriam de outra fonte de dados.
+ */
+export function getLeagueStats(code: string, limit = 10): Promise<LeagueStats> {
+  return cached(`leaguestats:${code}:${limit}`, 6 * HOUR, async () => {
+    const [scorers, assists] = await Promise.all([
+      tmHtml(`/-/torschuetzenliste/wettbewerb/${code}`)
+        .then(parseStatLeaders)
+        .catch(() => []),
+      tmHtml(`/-/assistliste/wettbewerb/${code}`)
+        .then(parseStatLeaders)
+        .catch(() => []),
+    ]);
+    return {
+      scorers: scorers.slice(0, limit),
+      assists: assists.slice(0, limit),
+    };
+  });
+}
+
+export interface ClubForm {
+  last: ClubMatch[];
+  next: ClubMatch[];
+}
+
+/** aaaammdd de hoje, para separar jogos disputados de futuros */
+function todayKey(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+}
+
+/**
+ * Últimos 3 e próximos 3 jogos do clube, somando todas as competições.
+ *
+ * O placar é o que separa disputado de futuro. Jogos sem placar cuja data já
+ * passou (adiados, cancelados) ficam de fora dos dois lados — apareceriam
+ * como "próximo jogo" numa data que não existe mais.
+ */
+export function getClubForm(id: string): Promise<ClubForm> {
+  return cached(`clubform:${id}`, 2 * HOUR, async () => {
+    const all = parseClubFixtures(await tmHtml(`/-/spielplan/verein/${id}`));
+    const hoje = todayKey();
+
+    const last = all
+      .filter((m) => m.score)
+      .sort((a, b) => b.sortKey.localeCompare(a.sortKey))
+      .slice(0, 3);
+
+    const next = all
+      .filter((m) => !m.score && m.sortKey >= hoje)
+      .sort((a, b) => a.sortKey.localeCompare(b.sortKey))
+      .slice(0, 3);
+
+    return {last, next};
+  });
 }
 
 /**

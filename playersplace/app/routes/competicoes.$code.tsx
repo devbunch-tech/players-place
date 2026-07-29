@@ -4,6 +4,7 @@ import {findLeague} from '~/lib/tm/leagues';
 import {
   getLeagueOverview,
   getLeagueStandings,
+  getLeagueStats,
   getLeagueTopPlayers,
 } from '~/lib/tm';
 import {euroToMillions, sumValues} from '~/lib/format';
@@ -17,6 +18,7 @@ import {
 } from '~/components/ui';
 import {AdSlot} from '~/components/AdSlot';
 import {ProCard} from '~/components/ProCard';
+import {StatLeaders} from '~/components/StatLeaders';
 
 export const meta: Route.MetaFunction = ({data}) => [
   {title: data ? `${data.overview.name} · Players Place` : 'Competição · Players Place'},
@@ -25,10 +27,12 @@ export const meta: Route.MetaFunction = ({data}) => [
 export async function loader({params}: Route.LoaderArgs) {
   const code = params.code.toUpperCase();
   const league = findLeague(code) ?? null;
-  const [overview, standings, topPlayers] = await Promise.all([
+  const [overview, standings, topPlayers, stats] = await Promise.all([
     getLeagueOverview(code).catch(() => null),
     getLeagueStandings(code).catch(() => []),
     getLeagueTopPlayers(code).catch(() => []),
+    // estatísticas são complemento: se falharem, a página da liga continua
+    getLeagueStats(code).catch(() => ({scorers: [], assists: []})),
   ]);
   if (!overview || overview.clubs.length === 0) {
     throw new Response('Não foi possível carregar esta competição agora.', {
@@ -49,13 +53,14 @@ export async function loader({params}: Route.LoaderArgs) {
     clubsSorted,
     standings,
     topPlayers: topPlayers.slice(0, 10),
+    stats,
     totalValue: sumValues(overview.clubs.map((c) => c.totalValue)),
     totalPlayers,
   };
 }
 
 export default function Competicao({loaderData}: Route.ComponentProps) {
-  const {code, league, overview, clubsSorted, standings, topPlayers, totalValue, totalPlayers} =
+  const {code, league, overview, clubsSorted, standings, topPlayers, totalValue, totalPlayers, stats} =
     loaderData;
 
   return (
@@ -88,7 +93,9 @@ export default function Competicao({loaderData}: Route.ComponentProps) {
       </div>
 
       <div className="mt-8 grid gap-10 lg:grid-cols-[1fr_360px]">
-        <div className="space-y-10">
+        {/* min-w-0 obrigatório: sem ele a tabela de artilheiros estica a
+            coluna e a página ganha scroll horizontal no mobile */}
+        <div className="min-w-0 space-y-10">
           <section>
             <SectionTitle>Clubes mais valiosos</SectionTitle>
             <div className="overflow-hidden rounded-card border border-line bg-card">
@@ -173,9 +180,20 @@ export default function Competicao({loaderData}: Route.ComponentProps) {
               </div>
             </section>
           ) : null}
+
+          <StatLeaders
+            title="Artilheiros"
+            rows={stats.scorers}
+            metricLabel="G"
+          />
+          <StatLeaders
+            title="Líderes de assistência"
+            rows={stats.assists}
+            metricLabel="A"
+          />
         </div>
 
-        <aside className="space-y-6">
+        <aside className="min-w-0 space-y-6">
           {topPlayers.length > 0 ? (
             <section className="rounded-card border border-line bg-card p-4">
               <h2 className="mb-2 font-display text-base font-extrabold tracking-tight">

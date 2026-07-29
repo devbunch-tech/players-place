@@ -50,7 +50,7 @@ export default function Valores({loaderData}: Route.ComponentProps) {
       </div>
 
       <div className="mt-6 grid gap-10 lg:grid-cols-[1fr_340px]">
-        <div>
+        <div className="min-w-0">
           {players.length === 0 ? (
             <EmptyNote>
               Não foi possível carregar o ranking agora — tente novamente em
@@ -115,7 +115,7 @@ export default function Valores({loaderData}: Route.ComponentProps) {
             </div>
           )}
         </div>
-        <aside className="space-y-6">
+        <aside className="min-w-0 space-y-6">
           <ProCard />
           <AdSlot />
         </aside>

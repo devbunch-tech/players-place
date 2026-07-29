@@ -47,6 +47,34 @@ interface ProSubscriptionsResult {
   } | null;
 }
 
+const CUSTOMER_ID_QUERY = `#graphql
+  query CustomerId {
+    customer {
+      id
+      firstName
+    }
+  }
+` as const;
+
+/**
+ * GID do cliente logado — é a chave que liga a escalação do Fantasy ao dono.
+ * null quando ninguém está logado.
+ */
+export async function getCustomerId(
+  context: Readonly<RouterContextProvider>,
+): Promise<{id: string; firstName: string | null} | null> {
+  try {
+    if (!(await context.customerAccount.isLoggedIn())) return null;
+    const {data} = await context.customerAccount.query<{
+      customer?: {id?: string; firstName?: string | null};
+    }>(CUSTOMER_ID_QUERY);
+    const id = data?.customer?.id;
+    return id ? {id, firstName: data?.customer?.firstName ?? null} : null;
+  } catch {
+    return null;
+  }
+}
+
 export interface ProState {
   /** o visitante está logado numa conta de cliente da loja */
   loggedIn: boolean;

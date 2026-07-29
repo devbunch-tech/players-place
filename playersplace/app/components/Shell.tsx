@@ -3,6 +3,7 @@ import {Form, Link, NavLink, useLocation} from 'react-router';
 
 const NAV = [
   {to: '/', label: 'Início'},
+  {to: '/fantasy', label: 'Game Fantasy'},
   {to: '/transferencias', label: 'Transferências'},
   {to: '/valores', label: 'Valores'},
   {to: '/competicoes', label: 'Competições'},
