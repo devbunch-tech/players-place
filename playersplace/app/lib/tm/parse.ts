@@ -801,6 +801,215 @@ export function parseRoundMatches(html: string): RoundMatch[] {
   return out;
 }
 
+// ---------- Rodada: jogos com clubes, data e horário ----------
+
+export interface FixtureClub {
+  id: string;
+  name: string;
+  crest: string | null;
+  /** posição na tabela como o TM exibe, ex.: "(17.)" */
+  standing: string;
+}
+
+export interface RoundFixture {
+  reportId: string;
+  home: FixtureClub;
+  away: FixtureClub;
+  score: string;
+  finished: boolean;
+  /** dd/mm/aaaa */
+  date: string;
+  /** hh:mm no horário de Brasília, como o TM publica */
+  time: string;
+  /** início em UTC (ISO), quando data e hora estão publicadas */
+  kickoff: string | null;
+}
+
+/**
+ * Jogos de `/-/spieltag/wettbewerb/{code}/saison_id/{s}/spieltag/{n}`.
+ *
+ * `parseRoundMatches` continua existindo para a apuração do Fantasy, que só
+ * precisa de placar; aqui interessa o jogo inteiro. Cada jogo é uma `div.box`
+ * com duas linhas: mandante/placar/visitante e, abaixo, data e horário.
+ *
+ * Cada clube aparece quatro vezes na linha (nome e escudo, cada um em versão
+ * `hide-for-small` e `show-for-small`), então lemos as células de nome pelo
+ * seletor do próprio TM em vez de deduplicar links.
+ */
+export function parseRoundFixtures(html: string): RoundFixture[] {
+  const root = parse(html);
+  const out: RoundFixture[] = [];
+
+  for (const box of root.querySelectorAll('div.box')) {
+    const link = box.querySelector('a[href*="/spielbericht/"] .matchresult');
+    if (!link) continue;
+    const reportId = box
+      .querySelector('a[href*="/spielbericht/"]')
+      ?.getAttribute('href')
+      ?.match(/spielbericht\/(\d+)/)?.[1];
+    if (!reportId) continue;
+
+    const noSmall = (sel: string) =>
+      box.querySelectorAll(sel).filter((td) => !hasClass(td, 'show-for-small'));
+    const nameCells = noSmall('td.spieltagsansicht-vereinsname');
+    const crestCells = noSmall('td.spieltagsansicht-wappen');
+    const clubs: FixtureClub[] = nameCells.slice(0, 2).map((td, i) => {
+      const a = td.querySelector('a[href*="/verein/"]');
+      return {
+        id: idFrom(a?.getAttribute('href'), 'verein') ?? '',
+        name: clean(a?.text) || clean(a?.getAttribute('title')),
+        crest: img(crestCells[i]?.querySelector('img')),
+        standing: clean(td.querySelector('.tabellenplatz')?.text),
+      };
+    });
+    if (clubs.length < 2) continue;
+
+    const score = clean(link.text);
+    // a data vem no href do link de "o que aconteceu hoje": /datum/2026-08-08
+    const iso = box
+      .querySelector('a[href*="/datum/"]')
+      ?.getAttribute('href')
+      ?.match(/datum\/(\d{4}-\d{2}-\d{2})/)?.[1];
+    const time = box.text.match(/(\d{2}:\d{2})/)?.[1] ?? '';
+
+    out.push({
+      reportId,
+      home: clubs[0],
+      away: clubs[1],
+      score,
+      finished: /^\d+:\d+$/.test(score),
+      date: iso ? iso.split('-').reverse().join('/') : '',
+      time,
+      kickoff: iso && time ? brasiliaToUtc(iso, time) : null,
+    });
+  }
+
+  return out;
+}
+
+/** horário do TM em português é de Brasília (UTC-3 fixo desde 2019) */
+function brasiliaToUtc(isoDate: string, time: string): string | null {
+  const d = new Date(`${isoDate}T${time}:00-03:00`);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+// ---------- Ficha de jogo: dados do confronto e quem está em dúvida ----------
+
+export interface MatchDoubt {
+  clubId: string | null;
+  clubName: string;
+  players: {id: string; name: string; reason: string}[];
+}
+
+export interface MatchPreview {
+  stadium: string | null;
+  referee: string | null;
+  /** caixa "Em dúvida", um bloco por clube */
+  doubts: MatchDoubt[];
+}
+
+/**
+ * O que a ficha de um jogo ainda não disputado oferece.
+ *
+ * Não há escalação provável — o Transfermarkt só publica a escalação quando
+ * ela sai, perto do apito. O que dá para antecipar é a caixa "Em dúvida", que
+ * traz o motivo de cada jogador, e os dados do confronto.
+ */
+export function parseMatchPreview(html: string): MatchPreview {
+  const root = parse(html);
+  const info = clean(root.querySelector('.sb-zusatzinfos')?.text);
+  const bruto = info.match(/[ÁA]rbitro:\s*(.+)$/i)?.[1]?.trim() ?? '';
+  // "aberto" é como o TM diz que a arbitragem ainda não foi definida
+  const referee = bruto && !/^(aberto|offen|open)$/i.test(bruto) ? bruto : null;
+  const stadium = clean(info.replace(/[ÁA]rbitro:.*$/i, '')) || null;
+
+  const doubts: MatchDoubt[] = [];
+  for (const box of root.querySelectorAll('div.box')) {
+    const head = clean(box.querySelector('h2, .content-box-headline')?.text);
+    if (!/d[úu]vida/i.test(head)) continue;
+    const content = box.querySelector('.content');
+    if (!content) continue;
+
+    // o bloco é texto corrido: <b>clube</b><br>jogador (motivo), jogador (motivo)
+    let atual: MatchDoubt | null = null;
+    for (const a of content.querySelectorAll('a')) {
+      const href = a.getAttribute('href') ?? '';
+      if (href.includes('/verein/')) {
+        atual = {
+          clubId: idFrom(href, 'verein'),
+          clubName: clean(a.text) || clean(a.getAttribute('title')),
+          players: [],
+        };
+        doubts.push(atual);
+      } else if (href.includes('/spieler/') && atual) {
+        const id = idFrom(href, 'spieler');
+        if (!id) continue;
+        // o motivo vem entre parênteses logo depois do link
+        const after = a.nextSibling?.text ?? '';
+        atual.players.push({
+          id,
+          name: clean(a.text) || clean(a.getAttribute('title')),
+          reason: clean(after.match(/\(([^)]*)\)/)?.[1] ?? ''),
+        });
+      }
+    }
+  }
+
+  return {stadium, referee, doubts: doubts.filter((d) => d.players.length)};
+}
+
+// ---------- Em risco de suspensão ----------
+
+export interface SuspensionRisk {
+  playerId: string;
+  name: string;
+  photo: string | null;
+  position: string;
+  age: string;
+  /** cartões amarelos acumulados */
+  yellows: string;
+  games: string;
+  /** média de cartões por jogo */
+  perGame: string;
+}
+
+/**
+ * Caixa "Em risco de suspensão" de `/-/sperrenundverletzungen/verein/{id}`.
+ *
+ * `parseClubAbsences` ignora esta caixa de propósito — para o Fantasy, quem
+ * está pendurado ainda joga. Aqui é justamente o que se quer mostrar.
+ */
+export function parseSuspensionRisk(html: string): SuspensionRisk[] {
+  const root = parse(html);
+  const out: SuspensionRisk[] = [];
+
+  for (const box of root.querySelectorAll('div.box')) {
+    const head = clean(box.querySelector('h2, .content-box-headline')?.text);
+    if (!/risco/i.test(head)) continue;
+
+    for (const tr of box.querySelectorAll('table.items > tbody > tr')) {
+      const link = tr.querySelector('a[href*="/profil/spieler/"]');
+      const playerId = idFrom(link?.getAttribute('href'), 'spieler');
+      if (!playerId) continue;
+      const tds = tr.querySelectorAll(':scope > td');
+      const inline = tds[0]?.querySelector('table.inline-table');
+      const inlineRows = inline?.querySelectorAll(':scope > tr') ?? [];
+      out.push({
+        playerId,
+        name: clean(link?.text),
+        photo: img(inline?.querySelector('img')),
+        position: clean(inlineRows[1]?.text),
+        age: clean(tds[1]?.text),
+        yellows: clean(tds[2]?.text),
+        games: clean(tds[3]?.text),
+        perGame: clean(tds[4]?.text),
+      });
+    }
+  }
+
+  return out;
+}
+
 export interface MatchEvent {
   scorerId: string;
   assistId: string | null;

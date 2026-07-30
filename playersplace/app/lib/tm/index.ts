@@ -14,8 +14,11 @@ import {
   parsePlayer,
   parseMatchGoals,
   parseRoundFirstKickoff,
+  parseMatchPreview,
+  parseRoundFixtures,
   parseRoundMatches,
   parseRumors,
+  parseSuspensionRisk,
   parseSearch,
   parseStandings,
   parseStatLeaders,
@@ -27,11 +30,14 @@ import {
   type ClubProfile,
   type ClubTransfers,
   type LeagueOverview,
+  type MatchPreview,
   type MarketPlayerPage,
   type MarketPlayerRow,
   type PlayerProfile,
   type RankedPlayer,
+  type RoundFixture,
   type RumorClub,
+  type SuspensionRisk,
   type SearchResults,
   type StandingsGroup,
   type TransferRow,
@@ -212,6 +218,104 @@ export function getClubAbsences(id: string): Promise<ClubAbsence[]> {
   return cached(`absences:${id}`, 2 * HOUR, async () =>
     parseClubAbsences(await tmHtml(`/-/sperrenundverletzungen/verein/${id}`)),
   );
+}
+
+export interface ClubUnavailable {
+  suspended: ClubAbsence[];
+  injured: ClubAbsence[];
+  risk: SuspensionRisk[];
+}
+
+/**
+ * Quem está fora e quem está pendurado, numa consulta só.
+ *
+ * As duas informações moram na mesma página do Transfermarkt (caixas
+ * "Suspensões e lesões" e "Em risco de suspensão"), então buscá-la uma vez e
+ * rodar os dois parsers economiza metade das requisições de um confronto.
+ */
+export function getClubUnavailable(id: string): Promise<ClubUnavailable> {
+  return cached(`unavail:${id}`, 2 * HOUR, async () => {
+    const html = await tmHtml(`/-/sperrenundverletzungen/verein/${id}`);
+    const todos = parseClubAbsences(html);
+    // o TM escreve o motivo por extenso ("Suspenso por cartões amarelos"), e
+    // às vezes vaza alemão/inglês; quem não casar aqui continua aparecendo em
+    // `injured`, então nenhum desfalque some da tela por erro de redação
+    const suspenso = (a: ClubAbsence) =>
+      /suspens|castig|cart[ãa]o vermelho|gesperr|suspended|red card/i.test(
+        a.reason,
+      );
+    return {
+      suspended: todos.filter(suspenso),
+      injured: todos.filter((a) => !suspenso(a)),
+      risk: parseSuspensionRisk(html),
+    };
+  });
+}
+
+export interface RoundFixtures {
+  round: number;
+  season: number;
+  fixtures: RoundFixture[];
+}
+
+/** jogos da rodada corrente, com clubes, data e horário */
+export function getRoundFixtures(code: string): Promise<RoundFixtures> {
+  return cached(`fixtures:${code}`, HOUR, async () => {
+    const {round, season} = await getRodadaAtual(code);
+    const fixtures = await tmHtml(
+      `/-/spieltag/wettbewerb/${code}/saison_id/${season}/spieltag/${round}`,
+    )
+      .then(parseRoundFixtures)
+      .catch(() => [] as RoundFixture[]);
+    return {round, season, fixtures};
+  });
+}
+
+export interface BriefingClub {
+  id: string;
+  suspended: ClubAbsence[];
+  /** demais desfalques (lesões e afins) — nada é descartado */
+  injured: ClubAbsence[];
+  risk: SuspensionRisk[];
+}
+
+export interface MatchBriefing {
+  preview: MatchPreview;
+  home: BriefingClub;
+  away: BriefingClub;
+}
+
+/**
+ * Tudo que dá para saber sobre um jogo antes dele acontecer: dúvidas,
+ * suspensos e pendurados dos dois lados.
+ *
+ * São 3 requisições (a ficha do jogo e a página de desfalques de cada clube),
+ * por isso é carregado sob demanda, um jogo por vez — a rodada inteira de uma
+ * vez seriam 30 e o worker tem limite de subrequests.
+ */
+export async function getMatchBriefing(
+  matchId: string,
+  homeId: string,
+  awayId: string,
+): Promise<MatchBriefing> {
+  const vazio: ClubUnavailable = {suspended: [], injured: [], risk: []};
+  const [preview, home, away] = await Promise.all([
+    cached(`preview:${matchId}`, HOUR, async () =>
+      parseMatchPreview(
+        await tmHtml(`/spielbericht/index/spielbericht/${matchId}`),
+      ),
+    ).catch(
+      (): MatchPreview => ({stadium: null, referee: null, doubts: []}),
+    ),
+    getClubUnavailable(homeId).catch(() => vazio),
+    getClubUnavailable(awayId).catch(() => vazio),
+  ]);
+
+  return {
+    preview,
+    home: {id: homeId, ...home},
+    away: {id: awayId, ...away},
+  };
 }
 
 export interface FantasyPlayer {

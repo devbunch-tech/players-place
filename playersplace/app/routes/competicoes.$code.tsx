@@ -6,6 +6,7 @@ import {
   getLeagueStandings,
   getLeagueStats,
   getLeagueTopPlayers,
+  getRoundFixtures,
 } from '~/lib/tm';
 import {euroToMillions, sumValues} from '~/lib/format';
 import {
@@ -19,20 +20,26 @@ import {
 import {AdSlot} from '~/components/AdSlot';
 import {ProCard} from '~/components/ProCard';
 import {StatLeaders} from '~/components/StatLeaders';
+import {RoundFixtures} from '~/components/RoundFixtures';
 
 export const meta: Route.MetaFunction = ({data}) => [
-  {title: data ? `${data.overview.name} · Players Place` : 'Competição · Players Place'},
+  {
+    title: data
+      ? `${data.overview.name} · Players Place`
+      : 'Competição · Players Place',
+  },
 ];
 
 export async function loader({params}: Route.LoaderArgs) {
   const code = params.code.toUpperCase();
   const league = findLeague(code) ?? null;
-  const [overview, standings, topPlayers, stats] = await Promise.all([
+  const [overview, standings, topPlayers, stats, round] = await Promise.all([
     getLeagueOverview(code).catch(() => null),
     getLeagueStandings(code).catch(() => []),
     getLeagueTopPlayers(code).catch(() => []),
     // estatísticas são complemento: se falharem, a página da liga continua
     getLeagueStats(code).catch(() => ({scorers: [], assists: []})),
+    getRoundFixtures(code).catch(() => null),
   ]);
   if (!overview || overview.clubs.length === 0) {
     throw new Response('Não foi possível carregar esta competição agora.', {
@@ -40,7 +47,8 @@ export async function loader({params}: Route.LoaderArgs) {
     });
   }
   const clubsSorted = [...overview.clubs].sort(
-    (a, b) => (euroToMillions(b.totalValue) ?? 0) - (euroToMillions(a.totalValue) ?? 0),
+    (a, b) =>
+      (euroToMillions(b.totalValue) ?? 0) - (euroToMillions(a.totalValue) ?? 0),
   );
   const totalPlayers = overview.clubs.reduce(
     (acc, c) => acc + (parseInt(c.squad, 10) || 0),
@@ -54,14 +62,25 @@ export async function loader({params}: Route.LoaderArgs) {
     standings,
     topPlayers: topPlayers.slice(0, 10),
     stats,
+    round,
     totalValue: sumValues(overview.clubs.map((c) => c.totalValue)),
     totalPlayers,
   };
 }
 
 export default function Competicao({loaderData}: Route.ComponentProps) {
-  const {code, league, overview, clubsSorted, standings, topPlayers, totalValue, totalPlayers, stats} =
-    loaderData;
+  const {
+    code,
+    league,
+    overview,
+    clubsSorted,
+    standings,
+    topPlayers,
+    totalValue,
+    totalPlayers,
+    stats,
+    round,
+  } = loaderData;
 
   return (
     <div className="pp-in">
@@ -96,6 +115,13 @@ export default function Competicao({loaderData}: Route.ComponentProps) {
         {/* min-w-0 obrigatório: sem ele a tabela de artilheiros estica a
             coluna e a página ganha scroll horizontal no mobile */}
         <div className="min-w-0 space-y-10">
+          {round?.fixtures.length ? (
+            <section>
+              <SectionTitle>{`Rodada ${round.round}`}</SectionTitle>
+              <RoundFixtures round={round.round} fixtures={round.fixtures} />
+            </section>
+          ) : null}
+
           <section>
             <SectionTitle>Clubes mais valiosos</SectionTitle>
             <div className="overflow-hidden rounded-card border border-line bg-card">
@@ -128,7 +154,10 @@ export default function Competicao({loaderData}: Route.ComponentProps) {
               <SectionTitle>Classificação</SectionTitle>
               <div className="space-y-6">
                 {standings.map((g, gi) => (
-                  <div key={gi} className="overflow-hidden rounded-card border border-line bg-card">
+                  <div
+                    key={gi}
+                    className="overflow-hidden rounded-card border border-line bg-card"
+                  >
                     {g.title && standings.length > 1 ? (
                       <div className="border-b border-innerline px-4 py-2.5 text-xs font-bold tracking-wide text-muted uppercase">
                         {g.title}
@@ -151,25 +180,51 @@ export default function Competicao({loaderData}: Route.ComponentProps) {
                         </thead>
                         <tbody>
                           {g.rows.map((r) => (
-                            <tr key={`${r.pos}-${r.clubId}`} className="border-b border-innerline last:border-b-0 hover:bg-hoverrow">
-                              <td className="px-3 py-2.5 text-center font-bold text-muted">{r.pos}</td>
+                            <tr
+                              key={`${r.pos}-${r.clubId}`}
+                              className="border-b border-innerline last:border-b-0 hover:bg-hoverrow"
+                            >
+                              <td className="px-3 py-2.5 text-center font-bold text-muted">
+                                {r.pos}
+                              </td>
                               <td className="px-3 py-2.5">
                                 {r.clubId ? (
-                                  <Link to={`/clubes/${r.clubId}`} className="flex items-center gap-2 font-semibold hover:text-pitch">
-                                    <Crest src={r.crest} name={r.club} size={18} />
+                                  <Link
+                                    to={`/clubes/${r.clubId}`}
+                                    className="flex items-center gap-2 font-semibold hover:text-pitch"
+                                  >
+                                    <Crest
+                                      src={r.crest}
+                                      name={r.club}
+                                      size={18}
+                                    />
                                     {r.club}
                                   </Link>
                                 ) : (
                                   r.club
                                 )}
                               </td>
-                              <td className="px-3 py-2.5 text-center text-muted">{r.played}</td>
-                              <td className="px-3 py-2.5 text-center text-muted">{r.won}</td>
-                              <td className="px-3 py-2.5 text-center text-muted">{r.draw}</td>
-                              <td className="px-3 py-2.5 text-center text-muted">{r.lost}</td>
-                              <td className="px-3 py-2.5 text-center text-muted">{r.goals}</td>
-                              <td className="px-3 py-2.5 text-center text-muted">{r.diff}</td>
-                              <td className="px-3 py-2.5 text-center font-extrabold">{r.points}</td>
+                              <td className="px-3 py-2.5 text-center text-muted">
+                                {r.played}
+                              </td>
+                              <td className="px-3 py-2.5 text-center text-muted">
+                                {r.won}
+                              </td>
+                              <td className="px-3 py-2.5 text-center text-muted">
+                                {r.draw}
+                              </td>
+                              <td className="px-3 py-2.5 text-center text-muted">
+                                {r.lost}
+                              </td>
+                              <td className="px-3 py-2.5 text-center text-muted">
+                                {r.goals}
+                              </td>
+                              <td className="px-3 py-2.5 text-center text-muted">
+                                {r.diff}
+                              </td>
+                              <td className="px-3 py-2.5 text-center font-extrabold">
+                                {r.points}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -210,12 +265,16 @@ export default function Competicao({loaderData}: Route.ComponentProps) {
                   </span>
                   <Avatar src={p.photo} name={p.name} size={32} />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] font-bold">{p.name}</div>
+                    <div className="truncate text-[13px] font-bold">
+                      {p.name}
+                    </div>
                     <div className="truncate text-xs text-faint">
                       {p.club?.name} · {p.position}
                     </div>
                   </div>
-                  <span className="text-[13px] font-extrabold tabular-nums">{p.value}</span>
+                  <span className="text-[13px] font-extrabold tabular-nums">
+                    {p.value}
+                  </span>
                 </Link>
               ))}
             </section>
