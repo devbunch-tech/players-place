@@ -10,6 +10,7 @@ import {
   parseClubFixtures,
   parseClubTransfers,
   parseLeagueOverview,
+  parseMarketPlayers,
   parsePlayer,
   parseMatchGoals,
   parseRoundFirstKickoff,
@@ -25,6 +26,8 @@ import {
   type ClubProfile,
   type ClubTransfers,
   type LeagueOverview,
+  type MarketPlayerPage,
+  type MarketPlayerRow,
   type PlayerProfile,
   type RankedPlayer,
   type SearchResults,
@@ -1041,4 +1044,70 @@ export function getTransferRecords(): Promise<TransferRow[]> {
   return cached('transferrecords', 24 * HOUR, async () =>
     parseTransfers(await tmHtml('/transfers/transferrekorde/statistik')),
   );
+}
+
+// ---------- Mercado: contratos a terminar / livres para assinar ----------
+
+/** quantos jogadores mostramos por página no Players Place */
+export const MARKET_PER_PAGE = 15;
+
+export interface MarketList {
+  rows: MarketPlayerRow[];
+  page: number;
+  totalPages: number;
+  /** título da lista no Transfermarkt (traz o ano dos contratos, p.ex.) */
+  title: string;
+}
+
+/** uma página da origem, do jeito que o Transfermarkt a pagina */
+function sourcePage(path: string, n: number): Promise<MarketPlayerPage> {
+  return cached(`market:${path}:${n}`, 6 * HOUR, async () =>
+    parseMarketPlayers(await tmHtml(n > 1 ? `${path}?page=${n}` : path)),
+  );
+}
+
+/**
+ * O Transfermarkt pagina estas listas com tamanho próprio (25 em contratos a
+ * terminar, 50 em jogadores sem contrato) e nós queremos 15 por página. Em vez
+ * de fixar esses números, medimos o tamanho na página 1 — que sempre buscamos,
+ * porque é dela que sai o título e o total de páginas da origem — e recortamos
+ * a janela pedida das páginas de origem que a cobrem (uma ou duas).
+ *
+ * `totalPages` é deliberadamente conservador: conta só os itens garantidos
+ * pelas páginas cheias da origem, para que nenhuma página nossa apareça vazia.
+ */
+async function marketList(path: string, page: number): Promise<MarketList> {
+  const first = await sourcePage(path, 1);
+  const size = first.rows.length;
+  if (!size) return {rows: [], page: 1, totalPages: 1, title: first.title};
+
+  const totalPages =
+    Math.floor(((first.lastPage - 1) * size) / MARKET_PER_PAGE) + 1;
+  const p = Math.min(Math.max(1, Math.floor(page) || 1), totalPages);
+
+  const start = (p - 1) * MARKET_PER_PAGE;
+  const from = Math.floor(start / size) + 1;
+  const to = Math.floor((start + MARKET_PER_PAGE - 1) / size) + 1;
+
+  const pages = await Promise.all(
+    Array.from({length: to - from + 1}, (_, i) =>
+      from + i === 1 ? Promise.resolve(first) : sourcePage(path, from + i),
+    ),
+  );
+  const offset = start - (from - 1) * size;
+  const rows = pages
+    .flatMap((sp) => sp.rows)
+    .slice(offset, offset + MARKET_PER_PAGE);
+
+  return {rows, page: p, totalPages, title: first.title};
+}
+
+/** jogadores com contrato se encerrando, do mais valioso ao menos valioso */
+export function getExpiringContracts(page = 1): Promise<MarketList> {
+  return marketList('/statistik/endendevertraege', page);
+}
+
+/** jogadores sem contrato — livres para assinar com qualquer clube */
+export function getFreeAgents(page = 1): Promise<MarketList> {
+  return marketList('/statistik/vertragslosespieler', page);
 }

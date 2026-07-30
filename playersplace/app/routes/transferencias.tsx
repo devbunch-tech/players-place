@@ -1,10 +1,37 @@
 import {Link} from 'react-router';
 import type {Route} from './+types/transferencias';
-import {getLatestTransfers, getTransferRecords} from '~/lib/tm';
-import {Avatar, Crest, EmptyNote, FeeTag} from '~/components/ui';
+import {
+  clubCrest,
+  getExpiringContracts,
+  getFreeAgents,
+  getLatestTransfers,
+  getTransferRecords,
+  type MarketList,
+} from '~/lib/tm';
+import {Avatar, Crest, EmptyNote, FeeTag, Pager} from '~/components/ui';
 import {AdSlot} from '~/components/AdSlot';
 import {ProCard} from '~/components/ProCard';
 import {SmartSearch} from '~/components/SmartSearch';
+
+const TABS = [
+  {id: 'ultimas', label: 'Últimas'},
+  {id: 'recordes', label: 'Recordes históricos'},
+  {id: 'contratos', label: 'Contratos a terminar'},
+  {id: 'livres', label: 'Livres para assinar'},
+] as const;
+
+type Tab = (typeof TABS)[number]['id'];
+
+const isTab = (v: string | null): v is Tab =>
+  TABS.some((t) => t.id === v);
+
+const SUBTITLE: Record<Tab, string> = {
+  ultimas: 'Movimentações confirmadas, direto do mercado.',
+  recordes: 'As maiores negociações da história do futebol.',
+  contratos:
+    'Jogadores com contrato chegando ao fim — os alvos da próxima janela.',
+  livres: 'Jogadores sem contrato, livres para assinar com qualquer clube.',
+};
 
 export const meta: Route.MetaFunction = () => [
   {title: 'Transferências · Players Place'},
@@ -12,56 +39,72 @@ export const meta: Route.MetaFunction = () => [
 
 export async function loader({request}: Route.LoaderArgs) {
   const url = new URL(request.url);
-  const tab = url.searchParams.get('tab') === 'recordes' ? 'recordes' : 'ultimas';
+  const raw = url.searchParams.get('tab');
+  const tab: Tab = isTab(raw) ? raw : 'ultimas';
+  const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
+
+  if (tab === 'contratos' || tab === 'livres') {
+    const market = await (tab === 'contratos'
+      ? getExpiringContracts(page)
+      : getFreeAgents(page)
+    ).catch(() => null);
+    return {tab, transfers: [], market};
+  }
+
   const transfers = await (tab === 'recordes'
     ? getTransferRecords()
     : getLatestTransfers()
   ).catch(() => []);
-  return {tab, transfers: transfers.slice(0, 25)};
+  return {tab, transfers: transfers.slice(0, 25), market: null};
 }
 
 export default function Transferencias({loaderData}: Route.ComponentProps) {
-  const {tab, transfers} = loaderData;
+  const {tab, transfers, market} = loaderData;
+  const isMarket = tab === 'contratos' || tab === 'livres';
+  const empty = isMarket ? !market?.rows.length : transfers.length === 0;
+
   return (
     <div className="pp-in">
       <h1 className="font-display text-[26px] font-extrabold tracking-tight">
         Transferências
       </h1>
-      <p className="mt-1 text-sm text-muted">
-        Movimentações confirmadas, direto do mercado.
-      </p>
+      <p className="mt-1 text-sm text-muted">{SUBTITLE[tab]}</p>
 
       <SmartSearch className="mt-5 max-w-xl" />
 
       {/* tab segmentada */}
-      <div className="mt-5 inline-flex rounded-[13px] bg-chipbg p-1">
-        <Link
-          to="/transferencias"
-          preventScrollReset
-          className={`flex h-9 items-center rounded-[11px] px-4 text-[13px] font-bold transition-colors ${
-            tab === 'ultimas' ? 'bg-card shadow-none' : 'text-muted'
-          }`}
-        >
-          Últimas
-        </Link>
-        <Link
-          to="/transferencias?tab=recordes"
-          preventScrollReset
-          className={`flex h-9 items-center rounded-[11px] px-4 text-[13px] font-bold transition-colors ${
-            tab === 'recordes' ? 'bg-card shadow-none' : 'text-muted'
-          }`}
-        >
-          Recordes históricos
-        </Link>
+      <div className="-mx-4 mt-5 overflow-x-auto px-4 sm:mx-0 sm:px-0">
+        <div className="inline-flex rounded-[13px] bg-chipbg p-1">
+          {TABS.map((t) => (
+            <Link
+              key={t.id}
+              to={t.id === 'ultimas' ? '/transferencias' : `/transferencias?tab=${t.id}`}
+              preventScrollReset
+              className={`flex h-9 items-center rounded-[11px] px-4 text-[13px] font-bold whitespace-nowrap transition-colors ${
+                tab === t.id ? 'bg-card shadow-none' : 'text-muted'
+              }`}
+            >
+              {t.label}
+            </Link>
+          ))}
+        </div>
       </div>
+
+      {isMarket && market?.title ? (
+        <p className="mt-4 text-[13px] font-semibold text-faint">
+          {market.title}
+        </p>
+      ) : null}
 
       <div className="mt-6 grid gap-10 lg:grid-cols-[1fr_340px]">
         <div className="min-w-0">
-          {transfers.length === 0 ? (
+          {empty ? (
             <EmptyNote>
-              Não foi possível carregar as transferências agora — tente
-              novamente em instantes.
+              Não foi possível carregar a lista agora — tente novamente em
+              instantes.
             </EmptyNote>
+          ) : isMarket ? (
+            <MarketTable list={market!} tab={tab} />
           ) : (
             <div className="overflow-hidden rounded-card border border-line bg-card">
               {transfers.map((t, i) => (
@@ -108,5 +151,85 @@ export default function Transferencias({loaderData}: Route.ComponentProps) {
         </aside>
       </div>
     </div>
+  );
+}
+
+function MarketTable({list, tab}: {list: MarketList; tab: Tab}) {
+  return (
+    <>
+      <div className="overflow-hidden rounded-card border border-line bg-card">
+        {list.rows.map((p) => (
+          <div
+            key={p.id}
+            className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-innerline px-4 py-3 last:border-b-0 hover:bg-hoverrow sm:flex-nowrap"
+          >
+            <Link
+              to={`/jogadores/${p.id}`}
+              className="flex min-w-0 flex-1 items-center gap-2.5 sm:w-[230px] sm:flex-none"
+            >
+              <Avatar src={p.photo} name={p.name} size={36} />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-bold hover:text-pitch">
+                  {p.name}
+                </span>
+                <span className="block truncate text-xs text-faint">
+                  {[p.position, p.age && `${p.age} anos`]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </span>
+              </span>
+            </Link>
+
+            {/* no mobile clube e rumores descem para a própria linha; no
+                desktop `contents` dissolve o wrapper e eles voltam à linha */}
+            <div className="order-last flex w-full min-w-0 items-center gap-2 sm:contents">
+              <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-full bg-soft px-3 py-1.5 text-xs">
+                {p.club ? (
+                  <>
+                    <Crest
+                      src={p.club.id ? clubCrest(p.club.id) : p.club.crest}
+                      name={p.club.name}
+                      size={16}
+                    />
+                    <span className="truncate font-semibold text-ink">
+                      {p.club.name}
+                    </span>
+                    {p.league ? (
+                      <span className="hidden max-w-[130px] truncate text-muted sm:block">
+                        {p.league.name}
+                      </span>
+                    ) : null}
+                  </>
+                ) : (
+                  <span className="truncate text-muted">
+                    {p.since ? `Livre desde ${p.since}` : 'Sem clube'}
+                  </span>
+                )}
+              </div>
+
+              {tab === 'contratos' && Number(p.rumors) > 0 ? (
+                <span
+                  className="shrink-0 rounded-md bg-chipbg px-2 py-0.5 text-[11px] font-bold text-muted tabular-nums"
+                >
+                  {p.rumors} rumor{Number(p.rumors) > 1 ? 'es' : ''}
+                </span>
+              ) : null}
+            </div>
+
+            <div className="ml-auto shrink-0">
+              <FeeTag fee={p.value} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <Pager
+        page={list.page}
+        totalPages={list.totalPages}
+        href={(n) =>
+          `/transferencias?tab=${tab}${n > 1 ? `&page=${n}` : ''}`
+        }
+      />
+    </>
   );
 }

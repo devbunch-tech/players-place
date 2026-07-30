@@ -359,6 +359,133 @@ export function parseTransfers(html: string): TransferRow[] {
   return out;
 }
 
+// ---------- Mercado: contratos a terminar / jogadores sem contrato ----------
+
+export interface MarketPlayerRow {
+  id: string;
+  name: string;
+  photo: string | null;
+  position: string;
+  age: string;
+  nationality: string;
+  /** clube atual — nulo na lista de jogadores livres */
+  club: TransferClub | null;
+  /** competição do clube atual (nome + código do Transfermarkt) */
+  league: {code: string; name: string} | null;
+  /** "sem contrato desde" (dd/mm/aaaa), só na lista de livres */
+  since: string | null;
+  value: string;
+  /** quantidade de rumores de transferência abertos */
+  rumors: string | null;
+}
+
+export interface MarketPlayerPage {
+  rows: MarketPlayerRow[];
+  /** título da página no Transfermarkt (ex.: "Contratos a terminar 2027") */
+  title: string;
+  /** última página do paginador da origem */
+  lastPage: number;
+}
+
+/** remove acentos e caixa para casar rótulos de coluna do TM */
+const foldLabel = (s: string) =>
+  clean(s)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+/**
+ * `/statistik/endendevertraege` e `/statistik/vertragslosespieler` usam a
+ * mesma `table.items`, mas com colunas diferentes e em ordens diferentes —
+ * daí o mapeamento ser feito pelos rótulos do `<thead>` em vez de índices
+ * fixos. Escopar a nacionalidade à coluna "Nac." é obrigatório: a célula do
+ * clube também traz uma bandeira (a do país da competição).
+ */
+export function parseMarketPlayers(html: string): MarketPlayerPage {
+  const root = parse(html);
+  const table = root.querySelector('table.items');
+  const headers = (table?.querySelectorAll('thead > tr > th') ?? []).map((th) =>
+    foldLabel(th.text),
+  );
+  const col = (prefix: string) =>
+    headers.findIndex((h) => h.startsWith(prefix));
+  const iAge = col('idade');
+  const iNat = col('nac');
+  const iClub = col('clube');
+  const iSince = col('sem contrato');
+  const iValue = col('valor');
+  const iRumors = col('rumores');
+
+  const rows: MarketPlayerRow[] = [];
+  for (const tr of table?.querySelectorAll('tbody > tr') ?? []) {
+    const pLink = tr.querySelector('a[href*="/profil/spieler/"]');
+    if (!pLink) continue;
+    const id = idFrom(pLink.getAttribute('href'), 'spieler');
+    if (!id) continue;
+    const tds = tr.querySelectorAll(':scope > td');
+    const inline = tds[0]?.querySelector('table.inline-table');
+    const inlineRows = inline?.querySelectorAll(':scope > tr') ?? [];
+
+    const clubCell = iClub >= 0 ? tds[iClub] : undefined;
+    // o primeiro link da célula é o escudo (sem texto); o nome curto está no
+    // `td.hauptlink` — preferir esse ao `title`, que traz a razão social
+    const clubLink =
+      clubCell?.querySelector('td.hauptlink a[href*="/startseite/verein/"]') ??
+      clubCell?.querySelector('a[href*="/startseite/verein/"]');
+    const clubId = idFrom(clubLink?.getAttribute('href'), 'verein');
+    const leagueLink = clubCell?.querySelector('a[href*="/wettbewerb/"]');
+    const leagueCode = leagueLink
+      ?.getAttribute('href')
+      ?.match(/\/wettbewerb\/([A-Za-z0-9]+)/)?.[1];
+
+    rows.push({
+      id,
+      name: clean(pLink.text) || clean(pLink.getAttribute('title')),
+      photo: img(inline?.querySelector('img')),
+      position: clean(inlineRows[1]?.text),
+      age: iAge >= 0 ? clean(tds[iAge]?.text) : '',
+      nationality:
+        iNat >= 0
+          ? (tds[iNat]
+              ?.querySelectorAll('img.flaggenrahmen')
+              .map((f) => clean(f.getAttribute('title')))
+              .filter(Boolean)
+              .join(', ') ?? '')
+          : '',
+      club: clubLink
+        ? {
+            id: clubId,
+            name:
+              clean(clubLink.text) || clean(clubLink.getAttribute('title')),
+            crest: img(clubCell?.querySelector('img')),
+          }
+        : null,
+      league: leagueCode
+        ? {code: leagueCode, name: clean(leagueLink?.text)}
+        : null,
+      since: iSince >= 0 ? clean(tds[iSince]?.text) || null : null,
+      value: iValue >= 0 ? clean(tds[iValue]?.text) : '',
+      rumors: iRumors >= 0 ? clean(tds[iRumors]?.text) || null : null,
+    });
+  }
+
+  return {
+    rows,
+    title: clean(root.querySelector('h1')?.text || root.querySelector('h2')?.text),
+    lastPage: parsePagerLastPage(root),
+  };
+}
+
+/** maior `?page=` do paginador — quantas páginas a origem tem */
+function parsePagerLastPage(root: HTMLElement): number {
+  let last = 1;
+  for (const a of root.querySelectorAll('.tm-pagination__list-item a')) {
+    const n = Number(a.getAttribute('href')?.match(/[?&]page=(\d+)/)?.[1]);
+    if (Number.isFinite(n) && n > last) last = n;
+  }
+  return last;
+}
+
 // ---------- Transferências de um clube (por temporada) ----------
 
 /** como o jogador chegou ao clube */

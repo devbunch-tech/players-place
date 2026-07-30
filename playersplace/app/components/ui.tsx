@@ -253,6 +253,107 @@ export function ChipLink({
   );
 }
 
+/**
+ * Janela de páginas ao redor da atual, sempre com a primeira e a última.
+ * `null` marca onde entra a reticência.
+ */
+function pageWindow(
+  page: number,
+  total: number,
+  span = 1,
+): {key: string; page: number | null}[] {
+  const wanted = new Set<number>([1, total]);
+  for (let p = page - span; p <= page + span; p++) {
+    if (p >= 1 && p <= total) wanted.add(p);
+  }
+  const pages = [...wanted].sort((a, b) => a - b);
+  const out: {key: string; page: number | null}[] = [];
+  pages.forEach((p, i) => {
+    if (i > 0 && p - pages[i - 1] > 1) out.push({key: `gap-${p}`, page: null});
+    out.push({key: String(p), page: p});
+  });
+  return out;
+}
+
+/** Paginador em links — `href(p)` monta a URL de cada página */
+export function Pager({
+  page,
+  totalPages,
+  href,
+}: {
+  page: number;
+  totalPages: number;
+  href: (p: number) => string;
+}) {
+  if (totalPages <= 1) return null;
+  const step =
+    'inline-flex h-9 min-w-9 items-center justify-center rounded-[11px] px-3 text-[13px] font-semibold tabular-nums';
+  return (
+    <nav
+      aria-label="Paginação"
+      className="mt-4 flex flex-wrap items-center justify-center gap-1.5"
+    >
+      {page > 1 ? (
+        <Link
+          to={href(page - 1)}
+          preventScrollReset
+          rel="prev"
+          className={`${step} border border-line bg-card text-muted hover:bg-hoverrow`}
+        >
+          Anterior
+        </Link>
+      ) : (
+        <span className={`${step} border border-line bg-card text-faint opacity-50`}>
+          Anterior
+        </span>
+      )}
+
+      {/* no mobile os números não cabem — vira "Página X de Y" */}
+      <span className={`${step} text-muted sm:hidden`}>
+        Página {page} de {totalPages}
+      </span>
+
+      <span className="hidden items-center gap-1.5 sm:flex">
+        {pageWindow(page, totalPages).map(({key, page: p}) =>
+          p === null ? (
+            <span key={key} className={`${step} text-faint`}>
+              …
+            </span>
+          ) : p === page ? (
+            <span key={key} aria-current="page" className={`${step} bg-ink text-white`}>
+              {p}
+            </span>
+          ) : (
+            <Link
+              key={key}
+              to={href(p)}
+              preventScrollReset
+              className={`${step} border border-line bg-card text-muted hover:bg-hoverrow`}
+            >
+              {p}
+            </Link>
+          ),
+        )}
+      </span>
+
+      {page < totalPages ? (
+        <Link
+          to={href(page + 1)}
+          preventScrollReset
+          rel="next"
+          className={`${step} border border-line bg-card text-muted hover:bg-hoverrow`}
+        >
+          Próxima
+        </Link>
+      ) : (
+        <span className={`${step} border border-line bg-card text-faint opacity-50`}>
+          Próxima
+        </span>
+      )}
+    </nav>
+  );
+}
+
 export function EmptyNote({children}: {children: React.ReactNode}) {
   return (
     <div className="rounded-card border border-line bg-card p-6 text-center text-sm text-muted">
