@@ -1,4 +1,4 @@
-import {Link} from 'react-router';
+import {Form, Link, useSubmit} from 'react-router';
 import type {Route} from './+types/transferencias';
 import {
   clubCrest,
@@ -42,11 +42,12 @@ export async function loader({request}: Route.LoaderArgs) {
   const raw = url.searchParams.get('tab');
   const tab: Tab = isTab(raw) ? raw : 'ultimas';
   const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
+  const nac = url.searchParams.get('nac');
 
   if (tab === 'contratos' || tab === 'livres') {
     const market = await (tab === 'contratos'
-      ? getExpiringContracts(page)
-      : getFreeAgents(page)
+      ? getExpiringContracts(page, nac)
+      : getFreeAgents(page, nac)
     ).catch(() => null);
     return {tab, transfers: [], market};
   }
@@ -90,15 +91,22 @@ export default function Transferencias({loaderData}: Route.ComponentProps) {
         </div>
       </div>
 
-      {isMarket && market?.title ? (
-        <p className="mt-4 text-[13px] font-semibold text-faint">
-          {market.title}
-        </p>
-      ) : null}
-
       <div className="mt-6 grid gap-10 lg:grid-cols-[1fr_340px]">
         <div className="min-w-0">
-          {empty ? (
+          {isMarket && market ? (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-[13px] font-semibold text-faint">
+                {market.title}
+              </p>
+              <NationalityFilter tab={tab} list={market} />
+            </div>
+          ) : null}
+
+          {isMarket && market && !market.rows.length ? (
+            <EmptyNote>
+              Nenhum jogador encontrado com essa nacionalidade.
+            </EmptyNote>
+          ) : empty ? (
             <EmptyNote>
               Não foi possível carregar a lista agora — tente novamente em
               instantes.
@@ -154,7 +162,45 @@ export default function Transferencias({loaderData}: Route.ComponentProps) {
   );
 }
 
+/**
+ * As nacionalidades vêm do próprio `select` da página de origem — cada lista
+ * oferece as suas, então não há tabela de países para manter aqui.
+ */
+function NationalityFilter({tab, list}: {tab: Tab; list: MarketList}) {
+  const submit = useSubmit();
+  if (!list.countries.length) return null;
+  return (
+    <Form method="get" className="flex items-center gap-2">
+      <input type="hidden" name="tab" value={tab} />
+      <label htmlFor="nac" className="text-[13px] font-semibold text-muted">
+        Nacionalidade
+      </label>
+      {/* sem `page`: trocar de país sempre volta para a primeira página */}
+      <select
+        id="nac"
+        name="nac"
+        defaultValue={list.country ?? ''}
+        onChange={(e) => void submit(e.currentTarget.form)}
+        className="h-10 max-w-[210px] rounded-btn border border-line bg-paper px-3 text-sm font-semibold"
+      >
+        <option value="">Todas</option>
+        {list.countries.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.name}
+          </option>
+        ))}
+      </select>
+    </Form>
+  );
+}
+
 function MarketTable({list, tab}: {list: MarketList; tab: Tab}) {
+  const query = (p: number) => {
+    const qs = new URLSearchParams({tab});
+    if (list.country) qs.set('nac', list.country);
+    if (p > 1) qs.set('page', String(p));
+    return `/transferencias?${qs.toString()}`;
+  };
   return (
     <>
       <div className="overflow-hidden rounded-card border border-line bg-card">
@@ -223,13 +269,7 @@ function MarketTable({list, tab}: {list: MarketList; tab: Tab}) {
         ))}
       </div>
 
-      <Pager
-        page={list.page}
-        totalPages={list.totalPages}
-        href={(n) =>
-          `/transferencias?tab=${tab}${n > 1 ? `&page=${n}` : ''}`
-        }
-      />
+      <Pager page={list.page} totalPages={list.totalPages} href={query} />
     </>
   );
 }

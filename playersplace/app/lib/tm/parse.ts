@@ -385,6 +385,8 @@ export interface MarketPlayerPage {
   title: string;
   /** última página do paginador da origem */
   lastPage: number;
+  /** opções do filtro de nacionalidade (só lidas quando pedidas) */
+  countries: {id: string; name: string}[];
 }
 
 /** remove acentos e caixa para casar rótulos de coluna do TM */
@@ -401,7 +403,10 @@ const foldLabel = (s: string) =>
  * fixos. Escopar a nacionalidade à coluna "Nac." é obrigatório: a célula do
  * clube também traz uma bandeira (a do país da competição).
  */
-export function parseMarketPlayers(html: string): MarketPlayerPage {
+export function parseMarketPlayers(
+  html: string,
+  withFilters = false,
+): MarketPlayerPage {
   const root = parse(html);
   const table = root.querySelector('table.items');
   const headers = (table?.querySelectorAll('thead > tr > th') ?? []).map((th) =>
@@ -473,7 +478,27 @@ export function parseMarketPlayers(html: string): MarketPlayerPage {
     rows,
     title: clean(root.querySelector('h1')?.text || root.querySelector('h2')?.text),
     lastPage: parsePagerLastPage(root),
+    countries: withFilters ? parseCountryOptions(root) : [],
   };
+}
+
+/**
+ * Opções do `select[name=land_id]` do formulário de filtros. Cada lista traz a
+ * sua — a de contratos a terminar tem o mundo inteiro, a de jogadores sem
+ * contrato só os países que hoje têm alguém livre — e a opção "todas" aparece
+ * como `0` numa página e `alle` na outra.
+ */
+function parseCountryOptions(root: HTMLElement): {id: string; name: string}[] {
+  const seen = new Set<string>();
+  const out: {id: string; name: string}[] = [];
+  for (const o of root.querySelectorAll('select[name="land_id"] option')) {
+    const id = clean(o.getAttribute('value'));
+    const name = clean(o.text);
+    if (!name || !/^\d+$/.test(id) || id === '0' || seen.has(id)) continue;
+    seen.add(id);
+    out.push({id, name});
+  }
+  return out;
 }
 
 /** maior `?page=` do paginador — quantas páginas a origem tem */
