@@ -361,6 +361,15 @@ export function parseTransfers(html: string): TransferRow[] {
 
 // ---------- Mercado: contratos a terminar / jogadores sem contrato ----------
 
+/** clube ligado a um jogador num rumor de transferência */
+export interface RumorClub {
+  id: string | null;
+  name: string;
+  crest: string | null;
+  /** "avaliação dos usuários" do Transfermarkt, ex. "51 %" */
+  probability: string | null;
+}
+
 export interface MarketPlayerRow {
   id: string;
   name: string;
@@ -377,6 +386,11 @@ export interface MarketPlayerRow {
   value: string;
   /** quantidade de rumores de transferência abertos */
   rumors: string | null;
+  /**
+   * Clubes por trás desses rumores. A lista de origem só traz a contagem —
+   * quem preenche isto é `getExpiringContracts`, com uma consulta por jogador.
+   */
+  interested?: RumorClub[];
 }
 
 export interface MarketPlayerPage {
@@ -497,6 +511,41 @@ function parseCountryOptions(root: HTMLElement): {id: string; name: string}[] {
     if (!name || !/^\d+$/.test(id) || id === '0' || seen.has(id)) continue;
     seen.add(id);
     out.push({id, name});
+  }
+  return out;
+}
+
+/**
+ * Clubes de `/-/geruechte/spieler/{id}`. A página tem duas tabelas idênticas:
+ * a caixa "Rumores" (os abertos, que é o número mostrado na lista de contratos
+ * a terminar) e o "Arquivo de notícias", com rumores já vencidos — pegar a
+ * tabela errada encheria a tela de interesse antigo.
+ */
+export function parseRumors(html: string): RumorClub[] {
+  const root = parse(html);
+  const boxes = root
+    .querySelectorAll('div.box')
+    .filter((b) => b.querySelector('table.items'));
+  const box =
+    boxes.find((b) =>
+      /^rumores/i.test(
+        clean(b.querySelector('h2, .table-header, .content-box-headline')?.text),
+      ),
+    ) ?? boxes[0];
+
+  const out: RumorClub[] = [];
+  for (const tr of box?.querySelectorAll('table.items > tbody > tr') ?? []) {
+    const link = tr.querySelector('a[href*="/verein/"]');
+    if (!link) continue;
+    const tds = tr.querySelectorAll(':scope > td');
+    // o TM escreve "51 %"; o espaço só atrapalha num chip estreito
+    const probability = clean(tds[tds.length - 1]?.text).replace(/\s+%/, '%');
+    out.push({
+      id: idFrom(link.getAttribute('href'), 'verein'),
+      name: clean(link.getAttribute('title')) || clean(link.text),
+      crest: img(tr.querySelector('img')),
+      probability: probability && probability !== '-' ? probability : null,
+    });
   }
   return out;
 }

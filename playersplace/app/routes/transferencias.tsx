@@ -7,6 +7,7 @@ import {
   getLatestTransfers,
   getTransferRecords,
   type MarketList,
+  type RumorClub,
 } from '~/lib/tm';
 import {Avatar, Crest, EmptyNote, FeeTag, Pager} from '~/components/ui';
 import {AdSlot} from '~/components/AdSlot';
@@ -22,8 +23,7 @@ const TABS = [
 
 type Tab = (typeof TABS)[number]['id'];
 
-const isTab = (v: string | null): v is Tab =>
-  TABS.some((t) => t.id === v);
+const isTab = (v: string | null): v is Tab => TABS.some((t) => t.id === v);
 
 const SUBTITLE: Record<Tab, string> = {
   ultimas: 'Movimentações confirmadas, direto do mercado.',
@@ -45,16 +45,16 @@ export async function loader({request}: Route.LoaderArgs) {
   const nac = url.searchParams.get('nac');
 
   if (tab === 'contratos' || tab === 'livres') {
-    const market = await (tab === 'contratos'
-      ? getExpiringContracts(page, nac)
-      : getFreeAgents(page, nac)
+    const market = await (
+      tab === 'contratos'
+        ? getExpiringContracts(page, nac)
+        : getFreeAgents(page, nac)
     ).catch(() => null);
     return {tab, transfers: [], market};
   }
 
-  const transfers = await (tab === 'recordes'
-    ? getTransferRecords()
-    : getLatestTransfers()
+  const transfers = await (
+    tab === 'recordes' ? getTransferRecords() : getLatestTransfers()
   ).catch(() => []);
   return {tab, transfers: transfers.slice(0, 25), market: null};
 }
@@ -79,7 +79,11 @@ export default function Transferencias({loaderData}: Route.ComponentProps) {
           {TABS.map((t) => (
             <Link
               key={t.id}
-              to={t.id === 'ultimas' ? '/transferencias' : `/transferencias?tab=${t.id}`}
+              to={
+                t.id === 'ultimas'
+                  ? '/transferencias'
+                  : `/transferencias?tab=${t.id}`
+              }
               preventScrollReset
               className={`flex h-9 items-center rounded-[11px] px-4 text-[13px] font-bold whitespace-nowrap transition-colors ${
                 tab === t.id ? 'bg-card shadow-none' : 'text-muted'
@@ -135,12 +139,20 @@ export default function Transferencias({loaderData}: Route.ComponentProps) {
                     </span>
                   </Link>
                   <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-full bg-soft px-3 py-1.5 text-xs">
-                    <Crest src={t.from?.crest} name={t.from?.name ?? ''} size={16} />
+                    <Crest
+                      src={t.from?.crest}
+                      name={t.from?.name ?? ''}
+                      size={16}
+                    />
                     <span className="max-w-[120px] truncate text-muted">
                       {t.from?.name || '—'}
                     </span>
                     <span className="text-faint">→</span>
-                    <Crest src={t.to?.crest} name={t.to?.name ?? ''} size={16} />
+                    <Crest
+                      src={t.to?.crest}
+                      name={t.to?.name ?? ''}
+                      size={16}
+                    />
                     <span className="max-w-[120px] truncate font-semibold text-ink">
                       {t.to?.name || '—'}
                     </span>
@@ -194,6 +206,46 @@ function NationalityFilter({tab, list}: {tab: Tab; list: MarketList}) {
   );
 }
 
+/** quantos clubes interessados cabem antes de virar "+N" */
+const MAX_INTERESTED = 4;
+
+/**
+ * Quem está de olho no jogador, em linha própria abaixo do jogador. Espremer
+ * isto ao lado do clube atual truncava os nomes a duas letras — e o nome do
+ * clube é justamente a informação. O percentual é a "avaliação dos usuários"
+ * do Transfermarkt, não uma probabilidade oficial.
+ *
+ * Se a consulta de rumores falhar, sobra a contagem que a lista já trazia.
+ */
+function InterestedClubs({clubs, count}: {clubs: RumorClub[]; count: number}) {
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1.5 pl-[46px] text-[11px]">
+      <span className="font-bold tracking-[0.08em] text-faint uppercase">
+        {clubs.length ? 'Interesse' : `${count} rumor${count > 1 ? 'es' : ''}`}
+      </span>
+      {clubs.slice(0, MAX_INTERESTED).map((c) => (
+        <span
+          key={c.id ?? c.name}
+          className="flex min-w-0 items-center gap-1.5 rounded-md bg-chipbg px-2 py-1 font-bold text-muted"
+        >
+          <Crest src={c.crest} name={c.name} size={13} />
+          <span className="truncate">{c.name}</span>
+          {c.probability ? (
+            <span className="whitespace-nowrap text-faint tabular-nums">
+              {c.probability}
+            </span>
+          ) : null}
+        </span>
+      ))}
+      {clubs.length > MAX_INTERESTED ? (
+        <span className="text-faint tabular-nums">
+          +{clubs.length - MAX_INTERESTED}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 function MarketTable({list, tab}: {list: MarketList; tab: Tab}) {
   const query = (p: number) => {
     const qs = new URLSearchParams({tab});
@@ -207,29 +259,28 @@ function MarketTable({list, tab}: {list: MarketList; tab: Tab}) {
         {list.rows.map((p) => (
           <div
             key={p.id}
-            className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-innerline px-4 py-3 last:border-b-0 hover:bg-hoverrow sm:flex-nowrap"
+            className="border-b border-innerline px-4 py-3 last:border-b-0 hover:bg-hoverrow"
           >
-            <Link
-              to={`/jogadores/${p.id}`}
-              className="flex min-w-0 flex-1 items-center gap-2.5 sm:w-[230px] sm:flex-none"
-            >
-              <Avatar src={p.photo} name={p.name} size={36} />
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-bold hover:text-pitch">
-                  {p.name}
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 sm:flex-nowrap">
+              <Link
+                to={`/jogadores/${p.id}`}
+                className="flex min-w-0 flex-1 items-center gap-2.5 sm:w-[230px] sm:flex-none"
+              >
+                <Avatar src={p.photo} name={p.name} size={36} />
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-bold hover:text-pitch">
+                    {p.name}
+                  </span>
+                  <span className="block truncate text-xs text-faint">
+                    {[p.position, p.age && `${p.age} anos`]
+                      .filter(Boolean)
+                      .join(' · ')}
+                  </span>
                 </span>
-                <span className="block truncate text-xs text-faint">
-                  {[p.position, p.age && `${p.age} anos`]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </span>
-              </span>
-            </Link>
+              </Link>
 
-            {/* no mobile clube e rumores descem para a própria linha; no
-                desktop `contents` dissolve o wrapper e eles voltam à linha */}
-            <div className="order-last flex w-full min-w-0 items-center gap-2 sm:contents">
-              <div className="flex min-w-0 flex-1 items-center gap-1.5 rounded-full bg-soft px-3 py-1.5 text-xs">
+              {/* no mobile o clube desce para a própria linha */}
+              <div className="order-last flex w-full min-w-0 items-center gap-1.5 rounded-full bg-soft px-3 py-1.5 text-xs sm:order-none sm:w-auto sm:flex-1">
                 {p.club ? (
                   <>
                     <Crest
@@ -253,18 +304,17 @@ function MarketTable({list, tab}: {list: MarketList; tab: Tab}) {
                 )}
               </div>
 
-              {tab === 'contratos' && Number(p.rumors) > 0 ? (
-                <span
-                  className="shrink-0 rounded-md bg-chipbg px-2 py-0.5 text-[11px] font-bold text-muted tabular-nums"
-                >
-                  {p.rumors} rumor{Number(p.rumors) > 1 ? 'es' : ''}
-                </span>
-              ) : null}
+              <div className="ml-auto shrink-0">
+                <FeeTag fee={p.value} />
+              </div>
             </div>
 
-            <div className="ml-auto shrink-0">
-              <FeeTag fee={p.value} />
-            </div>
+            {tab === 'contratos' && Number(p.rumors) > 0 ? (
+              <InterestedClubs
+                clubs={p.interested ?? []}
+                count={Number(p.rumors)}
+              />
+            ) : null}
           </div>
         ))}
       </div>

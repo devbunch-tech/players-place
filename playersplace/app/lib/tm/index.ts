@@ -15,6 +15,7 @@ import {
   parseMatchGoals,
   parseRoundFirstKickoff,
   parseRoundMatches,
+  parseRumors,
   parseSearch,
   parseStandings,
   parseStatLeaders,
@@ -30,6 +31,7 @@ import {
   type MarketPlayerRow,
   type PlayerProfile,
   type RankedPlayer,
+  type RumorClub,
   type SearchResults,
   type StandingsGroup,
   type TransferRow,
@@ -1140,12 +1142,36 @@ async function marketList(
   return {rows, page: p, totalPages, title: first.title, countries, country};
 }
 
-/** jogadores com contrato se encerrando, do mais valioso ao menos valioso */
-export function getExpiringContracts(
+/** clubes ligados a um jogador nos rumores abertos do Transfermarkt */
+export function getPlayerRumors(id: string): Promise<RumorClub[]> {
+  return cached(`rumors:${id}`, 6 * HOUR, async () =>
+    parseRumors(await tmHtml(`/-/geruechte/spieler/${id}`)),
+  );
+}
+
+/**
+ * Jogadores com contrato se encerrando, do mais valioso ao menos valioso, já
+ * com os clubes interessados de cada um.
+ *
+ * A lista de origem só publica a contagem de rumores, então os clubes saem de
+ * uma consulta por jogador — feitas em paralelo e só para quem tem rumor
+ * aberto, o que na prática são ~10 das 15 linhas. Cada uma tem cache próprio de
+ * 6h e falha em silêncio: rumor indisponível vira linha sem clube interessado,
+ * nunca uma página quebrada.
+ */
+export async function getExpiringContracts(
   page = 1,
   nationality?: string | null,
 ): Promise<MarketList> {
-  return marketList('/statistik/endendevertraege', page, nationality);
+  const list = await marketList('/statistik/endendevertraege', page, nationality);
+  const rows = await Promise.all(
+    list.rows.map(async (row) => {
+      if (!(Number(row.rumors) > 0)) return row;
+      const interested = await getPlayerRumors(row.id).catch(() => []);
+      return {...row, interested};
+    }),
+  );
+  return {...list, rows};
 }
 
 /** jogadores sem contrato — livres para assinar com qualquer clube */
