@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Form, Link, redirect, useFetcher} from 'react-router';
 import type {Route} from './+types/fantasy_.escalar';
-import {getLeagueOverview, getRodadaAtual} from '~/lib/tm';
+import {clubCrest, getLeagueOverview, getRodadaAtual} from '~/lib/tm';
 import {getCustomerId} from '~/lib/pro';
 import {createDb} from '~/lib/db';
 import {
@@ -28,6 +28,7 @@ import {
   setorDaVaga,
   type Setor,
 } from '~/lib/tm/positions';
+import {Avatar, Crest} from '~/components/ui';
 import {FantasyPitch, type VagaCampo} from '~/components/FantasyPitch';
 
 const LIGA = 'BRA1';
@@ -41,7 +42,8 @@ export async function loader({context}: Route.LoaderArgs) {
   if (!cliente) return redirect('/account/login');
 
   const db = createDb(context.env);
-  if (!db) throw new Response('Game Fantasy indisponível agora.', {status: 503});
+  if (!db)
+    throw new Response('Game Fantasy indisponível agora.', {status: 503});
 
   // sem apelido o participante não teria como aparecer no ranking
   const perfil = await buscarPerfil(db, cliente.id);
@@ -72,7 +74,11 @@ export async function loader({context}: Route.LoaderArgs) {
     round: rodada.round,
     season: rodada.season,
     deadlineISO: info?.deadlineISO ?? null,
-    clubes: (liga?.clubs ?? []).map((c) => ({id: c.id, name: c.name})),
+    clubes: (liga?.clubs ?? []).map((c) => ({
+      id: c.id,
+      name: c.name,
+      crest: clubCrest(c.id),
+    })),
     escalacao,
   };
 }
@@ -187,7 +193,10 @@ function Stepper({
   );
 }
 
-export default function Escalar({loaderData, actionData}: Route.ComponentProps) {
+export default function Escalar({
+  loaderData,
+  actionData,
+}: Route.ComponentProps) {
   const {round, deadlineISO, clubes, escalacao, season} = loaderData;
 
   const [formacaoCode, setFormacaoCode] = useState(
@@ -482,11 +491,118 @@ function IconeFora({suspenso}: {suspenso: boolean}) {
       aria-hidden
       className="shrink-0 text-down"
     >
-      <path
-        d="M10 3h4v7h7v4h-7v7h-4v-7H3v-4h7V3z"
-        fill="currentColor"
-      />
+      <path d="M10 3h4v7h7v4h-7v7h-4v-7H3v-4h7V3z" fill="currentColor" />
     </svg>
+  );
+}
+
+interface Clube {
+  id: string;
+  name: string;
+  crest: string | null;
+}
+
+/**
+ * Escolha de clube com escudo.
+ *
+ * Um `<select>` nativo não renderiza imagem dentro das `<option>`, então o
+ * campo é um botão que abre a lista — é o preço de mostrar os escudos.
+ */
+function SeletorClube({
+  clubes,
+  valor,
+  rotulo,
+  onEscolher,
+}: {
+  clubes: Clube[];
+  valor: string;
+  rotulo: string;
+  onEscolher: (id: string) => void;
+}) {
+  const [aberto, setAberto] = useState(false);
+  const escolhido = clubes.find((c) => c.id === valor) ?? null;
+
+  // Esc fecha de qualquer lugar — no documento, e não numa `div` com
+  // `onKeyDown`, que só ouviria com o foco dentro da lista
+  useEffect(() => {
+    if (!aberto) return;
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setAberto(false);
+    };
+    document.addEventListener('keydown', onEsc);
+    return () => document.removeEventListener('keydown', onEsc);
+  }, [aberto]);
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        aria-expanded={aberto}
+        aria-label={rotulo}
+        onClick={() => setAberto((a) => !a)}
+        className="flex h-11 w-full items-center gap-2.5 rounded-btn border border-line bg-paper px-3 text-left text-sm font-semibold"
+      >
+        {escolhido ? (
+          <>
+            <Crest src={escolhido.crest} name={escolhido.name} size={22} />
+            <span className="min-w-0 flex-1 truncate">{escolhido.name}</span>
+          </>
+        ) : (
+          <span className="min-w-0 flex-1 truncate text-muted">
+            Escolha o clube…
+          </span>
+        )}
+        <svg
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          aria-hidden
+          className={`shrink-0 text-faint transition-transform ${
+            aberto ? 'rotate-180' : ''
+          }`}
+        >
+          <path
+            d="M6 9l6 6 6-6"
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+
+      {aberto ? (
+        <>
+          {/* captura o clique fora sem prender o foco nem travar o scroll */}
+          <button
+            type="button"
+            aria-hidden
+            tabIndex={-1}
+            onClick={() => setAberto(false)}
+            className="fixed inset-0 z-10 cursor-default"
+          />
+          <div className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-btn border border-line bg-card shadow-lg">
+            {clubes.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => {
+                  onEscolher(c.id);
+                  setAberto(false);
+                }}
+                className={`flex w-full items-center gap-2.5 border-b border-innerline px-3 py-2.5 text-left text-sm font-semibold last:border-b-0 hover:bg-hoverrow ${
+                  c.id === valor ? 'bg-soft' : ''
+                }`}
+              >
+                <Crest src={c.crest} name={c.name} size={22} />
+                <span className="min-w-0 flex-1 truncate">{c.name}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
+    </div>
   );
 }
 
@@ -496,7 +612,7 @@ function SeletorJogador({
   setor,
   onEscolher,
 }: {
-  clubes: {id: string; name: string}[];
+  clubes: Clube[];
   jaEscalados: string[];
   setor: Setor;
   onEscolher: (p: JogadorEscolhido) => void;
@@ -514,6 +630,7 @@ function SeletorJogador({
     out: {
       playerId: string;
       name: string;
+      photo: string | null;
       position: string;
       reason: string;
     }[];
@@ -547,19 +664,12 @@ function SeletorJogador({
 
   return (
     <div className="mt-3 border-t border-innerline pt-3">
-      <select
-        value={clube}
-        onChange={(e) => setClube(e.target.value)}
-        aria-label={`Clube para escolher entre os ${NOME_SETOR[setor]}`}
-        className="h-11 w-full rounded-btn border border-line bg-paper px-3 text-sm font-semibold"
-      >
-        <option value="">Escolha o clube…</option>
-        {clubes.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
+      <SeletorClube
+        clubes={clubes}
+        valor={clube}
+        rotulo={`Clube para escolher entre os ${NOME_SETOR[setor]}`}
+        onEscolher={setClube}
+      />
 
       {fetcher.state !== 'idle' ? (
         <p className="mt-3 text-[13px] text-muted">Carregando elenco…</p>
@@ -599,6 +709,7 @@ function SeletorJogador({
                 <span className="w-6 text-center text-xs font-bold text-faint tabular-nums">
                   {p.number || '—'}
                 </span>
+                <Avatar src={p.photo} name={p.name} size={32} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-bold">
                     {p.name}
@@ -626,6 +737,7 @@ function SeletorJogador({
                 <span className="flex w-6 justify-center">
                   <IconeFora suspenso={suspenso} />
                 </span>
+                <Avatar src={o.photo} name={o.name} size={32} />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-bold line-through">
                     {o.name}

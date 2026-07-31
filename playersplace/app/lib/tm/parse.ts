@@ -1068,6 +1068,7 @@ export function parseMatchGoals(html: string): MatchEvent[] {
 export interface ClubAbsence {
   playerId: string;
   name: string;
+  photo: string | null;
   position: string;
   /** "Rotura do menisco", "Suspenso por cartões amarelos"… */
   reason: string;
@@ -1106,6 +1107,7 @@ export function parseClubAbsences(html: string): ClubAbsence[] {
       out.push({
         playerId,
         name: clean(link?.textContent),
+        photo: img(tr.querySelector('img.bilderrahmen-fixed')),
         position: clean(tds[3].textContent),
         reason: clean(tds[5].textContent),
         since: clean(tds[6].textContent),
