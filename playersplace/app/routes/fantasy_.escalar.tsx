@@ -19,6 +19,15 @@ import {
   salvarEscalacao,
   type PickSalvo,
 } from '~/lib/fantasy.server';
+// import direto (e não pelo barril `~/lib/tm`) para não arrastar o parser de
+// HTML do Transfermarkt para o bundle do cliente
+import {
+  ehSuspensao,
+  NOME_SETOR,
+  setorDaPosicao,
+  setorDaVaga,
+  type Setor,
+} from '~/lib/tm/positions';
 import {FantasyPitch, type VagaCampo} from '~/components/FantasyPitch';
 
 const LIGA = 'BRA1';
@@ -401,6 +410,7 @@ export default function Escalar({loaderData, actionData}: Route.ComponentProps) 
             <SeletorJogador
               clubes={clubes}
               jaEscalados={jaEscalados}
+              setor={setorDaVaga(posicaoAtiva.rotulo)}
               onEscolher={(p) => {
                 setVagas((v) => ({
                   ...v,
@@ -456,13 +466,39 @@ interface JogadorEscolhido {
   clubName: string;
 }
 
+/** ícone de bloqueio: cruz para lesão, cartão para suspensão */
+function IconeFora({suspenso}: {suspenso: boolean}) {
+  return suspenso ? (
+    <span
+      aria-hidden
+      className="inline-block h-3.5 w-2.5 shrink-0 rounded-[2px] bg-down"
+    />
+  ) : (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden
+      className="shrink-0 text-down"
+    >
+      <path
+        d="M10 3h4v7h7v4h-7v7h-4v-7H3v-4h7V3z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
 function SeletorJogador({
   clubes,
   jaEscalados,
+  setor,
   onEscolher,
 }: {
   clubes: {id: string; name: string}[];
   jaEscalados: string[];
+  setor: Setor;
   onEscolher: (p: JogadorEscolhido) => void;
 }) {
   const fetcher = useFetcher<{
@@ -475,7 +511,12 @@ function SeletorJogador({
       number: string;
       photo: string | null;
     }[];
-    out: {playerId: string; name: string; reason: string}[];
+    out: {
+      playerId: string;
+      name: string;
+      position: string;
+      reason: string;
+    }[];
     erro?: string;
   }>();
   const [clube, setClube] = useState('');
@@ -488,11 +529,28 @@ function SeletorJogador({
   const dados = fetcher.data;
   const escalados = new Set(jaEscalados);
 
+  /**
+   * Elenco e desfalques na mesma lista, já restrita ao setor da vaga: um
+   * goleiro não pode ocupar uma vaga de ataque. Posição que o parser não
+   * souber classificar entra assim mesmo — bloquear por desconhecimento
+   * deixaria o usuário sem conseguir escalar.
+   */
+  const doSetor = <T extends {position: string}>(itens: T[] | undefined) =>
+    (itens ?? []).filter((p) => {
+      const s = setorDaPosicao(p.position);
+      return s === null || s === setor;
+    });
+
+  const disponiveis = doSetor(dados?.available);
+  const fora = doSetor(dados?.out);
+  const carregado = fetcher.state === 'idle' && !!dados && !dados.erro;
+
   return (
     <div className="mt-3 border-t border-innerline pt-3">
       <select
         value={clube}
         onChange={(e) => setClube(e.target.value)}
+        aria-label={`Clube para escolher entre os ${NOME_SETOR[setor]}`}
         className="h-11 w-full rounded-btn border border-line bg-paper px-3 text-sm font-semibold"
       >
         <option value="">Escolha o clube…</option>
@@ -511,52 +569,75 @@ function SeletorJogador({
         <p className="mt-3 text-[13px] text-muted">{dados.erro}</p>
       ) : null}
 
-      {dados?.available?.length ? (
-        <>
-          <div className="mt-3 max-h-64 overflow-y-auto rounded-btn border border-line">
-            {dados.available.map((p) => {
-              const usado = escalados.has(p.id);
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  disabled={usado}
-                  onClick={() =>
-                    onEscolher({
-                      id: p.id,
-                      name: p.name,
-                      position: p.position,
-                      photo: p.photo,
-                      clubId: dados.clubId,
-                      clubName: dados.clubName,
-                    })
-                  }
-                  className="flex w-full items-center gap-3 border-b border-innerline px-3 py-2.5 text-left last:border-b-0 hover:bg-hoverrow disabled:opacity-35"
-                >
-                  <span className="w-6 text-center text-xs font-bold text-faint tabular-nums">
-                    {p.number || '—'}
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-bold">
-                      {p.name}
-                    </span>
-                    <span className="block truncate text-xs text-faint">
-                      {p.position}
-                      {usado ? ' · já escalado' : ''}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
-          </div>
+      {carregado && !disponiveis.length && !fora.length ? (
+        <p className="mt-3 text-[13px] text-muted">
+          Nenhum {NOME_SETOR[setor].replace(/e?s$/, '')} disponível neste clube.
+        </p>
+      ) : null}
 
-          {dados.out?.length ? (
-            <p className="mt-2 text-[11px] leading-relaxed text-faint">
-              Fora da rodada:{' '}
-              {dados.out.map((o) => `${o.name} (${o.reason})`).join(' · ')}
-            </p>
-          ) : null}
-        </>
+      {disponiveis.length || fora.length ? (
+        <div className="mt-3 max-h-64 overflow-y-auto rounded-btn border border-line">
+          {disponiveis.map((p) => {
+            const usado = escalados.has(p.id);
+            return (
+              <button
+                key={p.id}
+                type="button"
+                disabled={usado}
+                onClick={() =>
+                  onEscolher({
+                    id: p.id,
+                    name: p.name,
+                    position: p.position,
+                    photo: p.photo,
+                    clubId: dados!.clubId,
+                    clubName: dados!.clubName,
+                  })
+                }
+                className="flex w-full items-center gap-3 border-b border-innerline px-3 py-2.5 text-left last:border-b-0 hover:bg-hoverrow disabled:opacity-35"
+              >
+                <span className="w-6 text-center text-xs font-bold text-faint tabular-nums">
+                  {p.number || '—'}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-bold">
+                    {p.name}
+                  </span>
+                  <span className="block truncate text-xs text-faint">
+                    {p.position}
+                    {usado ? ' · já escalado' : ''}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+
+          {/* desfalques ficam na lista, visíveis e travados: sumir com eles
+              faz o usuário procurar um jogador que simplesmente não aparece */}
+          {fora.map((o) => {
+            const suspenso = ehSuspensao(o.reason);
+            return (
+              <div
+                key={o.playerId}
+                aria-disabled
+                title={o.reason}
+                className="flex w-full cursor-not-allowed items-center gap-3 border-b border-innerline bg-soft px-3 py-2.5 text-left opacity-60 last:border-b-0"
+              >
+                <span className="flex w-6 justify-center">
+                  <IconeFora suspenso={suspenso} />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-bold line-through">
+                    {o.name}
+                  </span>
+                  <span className="block truncate text-xs text-down">
+                    {suspenso ? 'Suspenso' : 'Lesionado'} · {o.reason}
+                  </span>
+                </span>
+              </div>
+            );
+          })}
+        </div>
       ) : null}
     </div>
   );

@@ -3,7 +3,7 @@
  * com cache em memória por rota.
  */
 import {cached, tmApiJson, tmHtml, tmJson} from './client';
-import {positionMeta} from './positions';
+import {ehSuspensao, positionMeta} from './positions';
 import {
   parseClub,
   parseClubAbsences,
@@ -259,13 +259,7 @@ export function getClubUnavailable(id: string): Promise<ClubUnavailable> {
   return cached(`unavail:${id}`, 2 * HOUR, async () => {
     const html = await tmHtml(`/-/sperrenundverletzungen/verein/${id}`);
     const todos = parseClubAbsences(html);
-    // o TM escreve o motivo por extenso ("Suspenso por cartões amarelos"), e
-    // às vezes vaza alemão/inglês; quem não casar aqui continua aparecendo em
-    // `injured`, então nenhum desfalque some da tela por erro de redação
-    const suspenso = (a: ClubAbsence) =>
-      /suspens|castig|cart[ãa]o vermelho|gesperr|suspended|red card/i.test(
-        a.reason,
-      );
+    const suspenso = (a: ClubAbsence) => ehSuspensao(a.reason);
     return {
       suspended: todos.filter(suspenso),
       injured: todos.filter((a) => !suspenso(a)),

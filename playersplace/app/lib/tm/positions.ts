@@ -33,3 +33,66 @@ export const POSITIONS: Record<number, PositionMeta> = {
 export function positionMeta(id: number | null | undefined): PositionMeta | null {
   return id ? (POSITIONS[id] ?? null) : null;
 }
+
+// ---------- Setores de campo (usado pela escalação do Fantasy) ----------
+
+/** as quatro faixas que uma vaga da escalação pode exigir */
+export type Setor = 'GOL' | 'DEF' | 'MEI' | 'ATA';
+
+const semAcento = (s: string) =>
+  s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+/**
+ * Ordem importa: "Meia Ofensivo" tem que cair em MEI antes de qualquer regra
+ * de ataque, e "Seg. Atacante" tem que cair em ATA.
+ */
+const SETORES: [RegExp, Setor][] = [
+  [/goleiro|goalkeeper|torwart/, 'GOL'],
+  [/zagueiro|lateral|libero|defensor|defender|abwehr/, 'DEF'],
+  [/volante|meia|meio|midfield|mittelfeld/, 'MEI'],
+  [/centroavante|atacante|ponta|forward|striker|sturm/, 'ATA'],
+];
+
+/**
+ * Setor de um jogador a partir da posição que o Transfermarkt publica —
+ * "Zagueiro", "Lateral Esq.", "Meia Ofensivo", "Seg. Atacante"…
+ *
+ * Devolve `null` para redação desconhecida, e quem chama deve **liberar** a
+ * escolha nesse caso. Errar para o lado do bloqueio é pior: uma palavra nova
+ * do TM deixaria o usuário sem conseguir escalar ninguém.
+ */
+export function setorDaPosicao(posicao: string): Setor | null {
+  const p = semAcento(posicao);
+  for (const [re, setor] of SETORES) if (re.test(p)) return setor;
+  return null;
+}
+
+/** setor exigido por uma vaga do campo (rótulos GOL, ZAG, VOL, MEI, ATA) */
+export function setorDaVaga(rotulo: string): Setor {
+  if (rotulo === 'GOL') return 'GOL';
+  if (rotulo === 'ZAG') return 'DEF';
+  if (rotulo === 'ATA') return 'ATA';
+  return 'MEI';
+}
+
+export const NOME_SETOR: Record<Setor, string> = {
+  GOL: 'goleiros',
+  DEF: 'defensores',
+  MEI: 'meio-campistas',
+  ATA: 'atacantes',
+};
+
+/**
+ * Suspensão ou lesão, a partir do motivo que o TM escreve por extenso.
+ * Não deu para conferir contra dado real — não havia nenhum suspenso no
+ * mundo quando isto foi escrito —, então quem não casar aqui é tratado como
+ * lesão e continua visível, nunca sumindo da tela.
+ */
+export function ehSuspensao(motivo: string): boolean {
+  return /suspens|castig|cartao vermelho|gesperr|suspended|red card/.test(
+    semAcento(motivo),
+  );
+}
