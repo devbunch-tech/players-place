@@ -1123,6 +1123,7 @@ export interface StatLeaderRow {
   rank: number;
   id: string;
   name: string;
+  photo: string | null;
   position: string;
   age: string;
   clubId: string | null;
@@ -1163,6 +1164,8 @@ export function parseStatLeaders(html: string): StatLeaderRow[] {
       rank: Number.isFinite(rank) ? rank : out.length + 1,
       id,
       name: clean(playerLink?.textContent),
+      // o retrato fica na inline-table da coluna 1, não na célula do nome
+      photo: img(tr.querySelector('img.bilderrahmen-fixed')),
       position: clean(tds[4].textContent),
       age: clean(tds[6].textContent),
       clubId: idFrom(clubLink?.getAttribute('href'), 'verein'),

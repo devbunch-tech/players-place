@@ -52,7 +52,7 @@ export function StatLeaders({
                   to={`/jogadores/${r.id}`}
                   className="flex min-w-0 flex-1 items-center gap-2.5"
                 >
-                  <Avatar src={null} name={r.name} size={30} />
+                  <Avatar src={r.photo} name={r.name} size={30} />
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-bold hover:text-pitch">
                       {r.name}
