@@ -1,7 +1,77 @@
 import {useEffect, useState} from 'react';
 import {Link, useFetcher} from 'react-router';
 import {Crest} from '~/components/ui';
-import type {MatchBriefing, RoundFixture} from '~/lib/tm';
+import type {
+  MatchBriefing,
+  RoundFixture,
+  RoundFixtures as Rodada,
+} from '~/lib/tm';
+
+/** ‹ Rodada N › — navegação entre as rodadas da temporada */
+export function RoundNav({
+  rodada,
+  href,
+}: {
+  rodada: Rodada;
+  href: (n: number) => string;
+}) {
+  const {round, totalRounds, currentRound} = rodada;
+  const max = totalRounds || round;
+  const seta =
+    'flex h-9 w-9 items-center justify-center rounded-[11px] border border-line bg-card text-muted';
+
+  const Passo = ({para, label, d}: {para: number; label: string; d: string}) =>
+    para >= 1 && para <= max ? (
+      <Link
+        to={href(para)}
+        preventScrollReset
+        aria-label={label}
+        className={`${seta} hover:bg-hoverrow`}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
+          <path
+            d={d}
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </Link>
+    ) : (
+      <span className={`${seta} text-faint opacity-40`} aria-hidden>
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+          <path
+            d={d}
+            stroke="currentColor"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </span>
+    );
+
+  return (
+    <div className="flex items-center gap-1.5">
+      {round !== currentRound && currentRound >= 1 && currentRound <= max ? (
+        <Link
+          to={href(currentRound)}
+          preventScrollReset
+          className="mr-1 text-[12px] font-semibold text-muted hover:text-pitch"
+        >
+          Rodada atual
+        </Link>
+      ) : null}
+      <Passo para={round - 1} label="Rodada anterior" d="M15 18l-6-6 6-6" />
+      <span className="min-w-[74px] text-center text-[13px] font-semibold text-muted tabular-nums">
+        {round}
+        {totalRounds ? ` de ${totalRounds}` : ''}
+      </span>
+      <Passo para={round + 1} label="Próxima rodada" d="M9 18l6-6-6-6" />
+    </div>
+  );
+}
 
 /**
  * Jogos da rodada corrente, cada um abrindo a preparação do confronto.
@@ -30,7 +100,15 @@ export function RoundFixtures({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aberto]);
 
-  if (!fixtures.length) return null;
+  // não devolver `null`: a navegação de rodada fica no cabeçalho da seção e
+  // some junto, prendendo quem chegou numa rodada sem jogos publicados
+  if (!fixtures.length) {
+    return (
+      <div className="rounded-card border border-line bg-card p-6 text-center text-sm text-muted">
+        Nenhum jogo publicado para a rodada {round}.
+      </div>
+    );
+  }
 
   return (
     <div className="overflow-hidden rounded-card border border-line bg-card">

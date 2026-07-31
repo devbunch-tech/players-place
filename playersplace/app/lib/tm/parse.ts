@@ -887,6 +887,16 @@ export function parseRoundFixtures(html: string): RoundFixture[] {
   return out;
 }
 
+/** quantas rodadas a temporada tem, lido do seletor de rodada da página */
+export function parseRoundCount(html: string): number {
+  let max = 0;
+  for (const o of parse(html).querySelectorAll('select[name="spieltag"] option')) {
+    const n = Number(o.getAttribute('value'));
+    if (Number.isFinite(n) && n > max) max = n;
+  }
+  return max;
+}
+
 /** horário do TM em português é de Brasília (UTC-3 fixo desde 2019) */
 function brasiliaToUtc(isoDate: string, time: string): string | null {
   const d = new Date(`${isoDate}T${time}:00-03:00`);

@@ -20,7 +20,7 @@ import {
 import {AdSlot} from '~/components/AdSlot';
 import {ProCard} from '~/components/ProCard';
 import {StatLeaders} from '~/components/StatLeaders';
-import {RoundFixtures} from '~/components/RoundFixtures';
+import {RoundFixtures, RoundNav} from '~/components/RoundFixtures';
 
 export const meta: Route.MetaFunction = ({data}) => [
   {
@@ -30,8 +30,10 @@ export const meta: Route.MetaFunction = ({data}) => [
   },
 ];
 
-export async function loader({params}: Route.LoaderArgs) {
+export async function loader({params, request}: Route.LoaderArgs) {
   const code = params.code.toUpperCase();
+  const rodada =
+    Number(new URL(request.url).searchParams.get('rodada')) || null;
   const league = findLeague(code) ?? null;
   const [overview, standings, topPlayers, stats, round] = await Promise.all([
     getLeagueOverview(code).catch(() => null),
@@ -39,7 +41,7 @@ export async function loader({params}: Route.LoaderArgs) {
     getLeagueTopPlayers(code).catch(() => []),
     // estatísticas são complemento: se falharem, a página da liga continua
     getLeagueStats(code).catch(() => ({scorers: [], assists: []})),
-    getRoundFixtures(code).catch(() => null),
+    getRoundFixtures(code, rodada).catch(() => null),
   ]);
   if (!overview || overview.clubs.length === 0) {
     throw new Response('Não foi possível carregar esta competição agora.', {
@@ -115,9 +117,18 @@ export default function Competicao({loaderData}: Route.ComponentProps) {
         {/* min-w-0 obrigatório: sem ele a tabela de artilheiros estica a
             coluna e a página ganha scroll horizontal no mobile */}
         <div className="min-w-0 space-y-10">
-          {round?.fixtures.length ? (
+          {round?.totalRounds ? (
             <section>
-              <SectionTitle>{`Rodada ${round.round}`}</SectionTitle>
+              <SectionTitle
+                action={
+                  <RoundNav
+                    rodada={round}
+                    href={(n) => `/competicoes/${code}?rodada=${n}`}
+                  />
+                }
+              >
+                Jogos da rodada
+              </SectionTitle>
               <RoundFixtures round={round.round} fixtures={round.fixtures} />
             </section>
           ) : null}

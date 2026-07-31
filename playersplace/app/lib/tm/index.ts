@@ -15,6 +15,7 @@ import {
   parseMatchGoals,
   parseRoundFirstKickoff,
   parseMatchPreview,
+  parseRoundCount,
   parseRoundFixtures,
   parseRoundMatches,
   parseRumors,
@@ -125,6 +126,26 @@ export interface RodadaInfo {
 }
 
 /**
+ * `saison_id` da temporada em curso, deduzido do rótulo que o Transfermarkt
+ * exibe na competição.
+ *
+ * As duas convenções não podem ser tratadas igual: liga de ano-calendário
+ * (Brasil) mostra "2026" e o `saison_id` é **2025**; liga que atravessa o ano
+ * (Europa) mostra "26/27" e o `saison_id` é **2026**. Fixar `ano - 1` para
+ * todo mundo — como era antes — jogava as ligas europeias na temporada
+ * passada durante o recesso: em julho/2026 a Premier League abria na rodada 1
+ * de agosto/**2025**, um campeonato já encerrado.
+ */
+function seasonId(label: string): number {
+  const split = label.match(/(\d{2,4})\s*\/\s*\d{2}/);
+  if (split) {
+    return split[1].length === 4 ? Number(split[1]) : 2000 + Number(split[1]);
+  }
+  const ano = label.match(/(\d{4})/);
+  return (ano ? Number(ano[1]) : new Date().getUTCFullYear()) - 1;
+}
+
+/**
  * Rodada corrente do campeonato e quando ela começa.
  *
  * O Transfermarkt não publica "rodada atual" num campo próprio: inferimos
@@ -134,12 +155,13 @@ export interface RodadaInfo {
  */
 export function getRodadaAtual(code: string): Promise<RodadaInfo> {
   return cached(`rodada:${code}`, HOUR, async () => {
-    const standings = await getLeagueStandings(code).catch(() => []);
+    const [standings, overview] = await Promise.all([
+      getLeagueStandings(code).catch(() => []),
+      getLeagueOverview(code).catch(() => null),
+    ]);
     const jogos = standings.flatMap((g) => g.rows).map((r) => Number(r.played) || 0);
     const round = jogos.length ? Math.max(...jogos) + 1 : 1;
-
-    // temporada de ano-calendário (Brasil): saison_id é o ano anterior
-    const season = new Date().getUTCFullYear() - 1;
+    const season = seasonId(overview?.season ?? '');
 
     const firstKickoff = await tmHtml(
       `/-/spieltag/wettbewerb/${code}/saison_id/${season}/spieltag/${round}`,
@@ -253,21 +275,41 @@ export function getClubUnavailable(id: string): Promise<ClubUnavailable> {
 }
 
 export interface RoundFixtures {
+  /** rodada exibida */
   round: number;
+  /** rodada corrente do campeonato, para marcar onde o usuário está */
+  currentRound: number;
   season: number;
+  /** total de rodadas da temporada, do seletor do Transfermarkt */
+  totalRounds: number;
   fixtures: RoundFixture[];
 }
 
-/** jogos da rodada corrente, com clubes, data e horário */
-export function getRoundFixtures(code: string): Promise<RoundFixtures> {
-  return cached(`fixtures:${code}`, HOUR, async () => {
-    const {round, season} = await getRodadaAtual(code);
-    const fixtures = await tmHtml(
-      `/-/spieltag/wettbewerb/${code}/saison_id/${season}/spieltag/${round}`,
-    )
-      .then(parseRoundFixtures)
-      .catch(() => [] as RoundFixture[]);
-    return {round, season, fixtures};
+/**
+ * Jogos de uma rodada. Sem `round`, a rodada corrente.
+ *
+ * Cada rodada tem cache próprio: navegar para a seguinte e voltar não
+ * refaz a consulta.
+ */
+export function getRoundFixtures(
+  code: string,
+  round?: number | null,
+): Promise<RoundFixtures> {
+  const pedida = round && round > 0 ? Math.floor(round) : null;
+  return cached(`fixtures:${code}:${pedida ?? 'atual'}`, HOUR, async () => {
+    const atual = await getRodadaAtual(code);
+    const n = pedida ?? atual.round;
+    const html = await tmHtml(
+      `/-/spieltag/wettbewerb/${code}/saison_id/${atual.season}/spieltag/${n}`,
+    ).catch(() => '');
+
+    return {
+      round: n,
+      currentRound: atual.round,
+      season: atual.season,
+      totalRounds: html ? parseRoundCount(html) : 0,
+      fixtures: html ? parseRoundFixtures(html) : [],
+    };
   });
 }
 
