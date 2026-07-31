@@ -4,6 +4,7 @@
  * Módulo puro: sem I/O, sem banco. Tudo aqui é determinístico e testável,
  * porque é o que decide quem ganha prêmio.
  */
+import type {RotuloVaga} from '~/lib/tm/positions';
 
 // ---------------------------------------------------------------------------
 // Pontuação
@@ -101,8 +102,8 @@ export interface PosicaoCampo {
   x: number;
   /** porcentagem da altura; 0 é o ataque, 100 é o próprio gol */
   y: number;
-  /** GOL, ZAG, VOL, MEI, ATA */
-  rotulo: string;
+  /** o que aparece desenhado na vaga: LE, ZAG, VOL, MC, PE… */
+  rotulo: RotuloVaga;
 }
 
 // o gol fica embaixo e o ataque em cima, como na página do jogador
@@ -110,11 +111,56 @@ const Y_GOLEIRO = 90;
 const Y_PRIMEIRA_LINHA = 74;
 const Y_ULTIMA_LINHA = 18;
 
-function rotuloDaLinha(indice: number, total: number): string {
+/**
+ * Rótulo de cada vaga, linha por linha, para as formações que existem.
+ *
+ * É uma tabela escrita à mão em vez de regra genérica porque a leitura muda
+ * com o desenho: os homens de ponta de uma linha de 4 defensores são laterais,
+ * mas numa linha de 3 são todos zagueiros; e as pontas do meio-campo viram
+ * alas (LE/LD) quando a defesa tem 3, porque é quem de fato ocupa o corredor.
+ *
+ * Cada entrada precisa bater com `linhas` da formação; se não bater,
+ * `posicoesDaFormacao` cai no rótulo genérico daquela linha.
+ */
+const ROTULOS: Record<string, RotuloVaga[][]> = {
+  '4-3-3': [
+    ['LE', 'ZAG', 'ZAG', 'LD'],
+    ['MC', 'VOL', 'MC'],
+    ['PE', 'CA', 'PD'],
+  ],
+  '4-4-2': [
+    ['LE', 'ZAG', 'ZAG', 'LD'],
+    ['ME', 'VOL', 'VOL', 'MD'],
+    ['CA', 'CA'],
+  ],
+  '4-2-3-1': [
+    ['LE', 'ZAG', 'ZAG', 'LD'],
+    ['VOL', 'VOL'],
+    ['ME', 'MC', 'MD'],
+    ['CA'],
+  ],
+  '3-5-2': [
+    ['ZAG', 'ZAG', 'ZAG'],
+    ['LE', 'VOL', 'MC', 'VOL', 'LD'],
+    ['CA', 'CA'],
+  ],
+  '3-4-3': [
+    ['ZAG', 'ZAG', 'ZAG'],
+    ['LE', 'VOL', 'VOL', 'LD'],
+    ['PE', 'CA', 'PD'],
+  ],
+  '5-3-2': [
+    ['LE', 'ZAG', 'ZAG', 'ZAG', 'LD'],
+    ['MC', 'VOL', 'MC'],
+    ['CA', 'CA'],
+  ],
+};
+
+/** rede de segurança para formação sem entrada na tabela acima */
+function rotuloDaLinha(indice: number, total: number): RotuloVaga {
   if (indice === 0) return 'ZAG';
-  if (indice === total - 1) return 'ATA';
-  // com 4 linhas, a segunda é de volantes
-  return total >= 4 && indice === 1 ? 'VOL' : 'MEI';
+  if (indice === total - 1) return 'CA';
+  return total >= 4 && indice === 1 ? 'VOL' : 'MC';
 }
 
 /**
@@ -133,16 +179,20 @@ export function posicoesDaFormacao(f: Formacao): PosicaoCampo[] {
   const passo =
     nLinhas > 1 ? (Y_PRIMEIRA_LINHA - Y_ULTIMA_LINHA) / (nLinhas - 1) : 0;
 
+  const tabela = ROTULOS[f.code];
+
   let slot = 2;
   f.linhas.forEach((qtd, i) => {
     const y = nLinhas > 1 ? Y_PRIMEIRA_LINHA - i * passo : 46;
+    // só usa a tabela quando ela descreve exatamente esta linha
+    const daLinha = tabela?.[i]?.length === qtd ? tabela[i] : null;
     for (let j = 0; j < qtd; j++) {
       posicoes.push({
         slot: slot++,
         // distribui na horizontal deixando margem nas laterais
         x: ((j + 1) * 100) / (qtd + 1),
         y,
-        rotulo: rotuloDaLinha(i, nLinhas),
+        rotulo: daLinha ? daLinha[j] : rotuloDaLinha(i, nLinhas),
       });
     }
   });

@@ -70,12 +70,41 @@ export function setorDaPosicao(posicao: string): Setor | null {
   return null;
 }
 
-/** setor exigido por uma vaga do campo (rótulos GOL, ZAG, VOL, MEI, ATA) */
-export function setorDaVaga(rotulo: string): Setor {
-  if (rotulo === 'GOL') return 'GOL';
-  if (rotulo === 'ZAG') return 'DEF';
-  if (rotulo === 'ATA') return 'ATA';
-  return 'MEI';
+/** rótulo desenhado numa vaga do campo */
+export type RotuloVaga =
+  | 'GOL'
+  | 'LE'
+  | 'ZAG'
+  | 'LD'
+  | 'VOL'
+  | 'MC'
+  | 'ME'
+  | 'MD'
+  | 'PE'
+  | 'CA'
+  | 'PD';
+
+/**
+ * Setor exigido por cada rótulo. É um `Record` completo de propósito: rótulo
+ * novo sem setor vira erro de compilação, e não uma vaga que silenciosamente
+ * passa a oferecer os jogadores errados no seletor.
+ */
+const SETOR_DA_VAGA: Record<RotuloVaga, Setor> = {
+  GOL: 'GOL',
+  LE: 'DEF',
+  ZAG: 'DEF',
+  LD: 'DEF',
+  VOL: 'MEI',
+  MC: 'MEI',
+  ME: 'MEI',
+  MD: 'MEI',
+  PE: 'ATA',
+  CA: 'ATA',
+  PD: 'ATA',
+};
+
+export function setorDaVaga(rotulo: RotuloVaga): Setor {
+  return SETOR_DA_VAGA[rotulo];
 }
 
 export const NOME_SETOR: Record<Setor, string> = {
