@@ -1,6 +1,7 @@
 import {createHydrogenContext} from '@shopify/hydrogen';
 import {AppSession} from '~/lib/session';
 import {CART_QUERY_FRAGMENT} from '~/lib/fragments';
+import {registrarWaitUntil} from '~/lib/tm/client';
 import type {CartApiQueryFragment} from 'storefrontapi.generated';
 
 // Define the additional context object
@@ -51,6 +52,9 @@ export async function createHydrogenRouterContext(
   }
 
   const waitUntil = executionContext.waitUntil.bind(executionContext);
+  // O cache do Transfermarkt revalida em segundo plano e precisa deste
+  // `waitUntil`, senão o Worker cancela a promessa assim que a resposta sai.
+  registrarWaitUntil(waitUntil);
   const [cache, session] = await Promise.all([
     caches.open('hydrogen'),
     AppSession.init(request, [sessionSecret ?? 'playersplace-dev-secret']),

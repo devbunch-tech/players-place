@@ -14,6 +14,7 @@ import type {Route} from './+types/root';
 import favicon from '~/assets/favicon.svg';
 import tailwindStyles from '~/styles/tailwind.css?url';
 import {Header, Footer} from '~/components/Shell';
+import {BolaRolando} from '~/components/BolaRolando';
 import {resolveProState} from '~/lib/pro';
 import {SITE_DESCRIPTION, SITE_NAME, seo} from '~/lib/seo';
 
@@ -108,6 +109,7 @@ export default function App() {
         <Outlet />
       </main>
       <Footer />
+      <BolaRolando />
     </div>
   );
 }

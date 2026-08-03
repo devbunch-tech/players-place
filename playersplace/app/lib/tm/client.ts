@@ -46,6 +46,94 @@ async function openCache(): Promise<Cache | null> {
   }
 }
 
+/**
+ * Por quanto tempo a entrada fica GUARDADA na Cache API, independente de estar
+ * fresca. É deliberadamente muito maior que qualquer TTL lógico: a Cache API
+ * do Worker trata entrada vencida como miss, então usar o TTL real aqui
+ * impediria justamente o que dá valor ao stale-while-revalidate — ter a cópia
+ * velha em mãos na hora de responder.
+ */
+const RETENCAO = 7 * 24 * 3600;
+
+/** validade lógica, guardada por nós porque o `max-age` acima é outra coisa */
+const HEADER_FRESCO_ATE = 'x-fresco-ate';
+
+/**
+ * `waitUntil` da requisição em curso, preenchido por `lib/context.ts` a cada
+ * request. Sem ele o Worker cancela qualquer promessa que sobreviva à
+ * resposta, e a revalidação em segundo plano simplesmente não acontece.
+ *
+ * É um holder de módulo porque `cached()` não enxerga o contexto da
+ * requisição. Um isolate pode atender requisições concorrentes e pegar aqui o
+ * `waitUntil` de uma vizinha — o que é inofensivo: só amarra a tarefa ao ciclo
+ * de vida daquela requisição, e ambas vivem no mesmo isolate.
+ */
+let waitUntilAtual: ((p: Promise<unknown>) => void) | null = null;
+
+export function registrarWaitUntil(fn: (p: Promise<unknown>) => void): void {
+  waitUntilAtual = fn;
+}
+
+/** revalidações em voo, para N requisições simultâneas não virarem N fetches */
+const revalidando = new Set<string>();
+
+function revalidarEmSegundoPlano<T>(
+  key: string,
+  ttlSeconds: number,
+  fn: () => Promise<T>,
+  cache: Cache | null,
+): void {
+  if (revalidando.has(key)) return;
+  revalidando.add(key);
+
+  const tarefa = (async () => {
+    try {
+      const value = await fn();
+      remember(key, ttlSeconds, value);
+      if (cache && value !== undefined) await guardar(cache, key, ttlSeconds, value);
+    } catch {
+      // origem fora do ar: a cópia velha continua servindo, que é o objetivo
+    } finally {
+      revalidando.delete(key);
+    }
+  })();
+
+  // sem waitUntil (dev local, ou request já encerrada) a promessa ainda roda
+  // até onde der; com ele, roda até o fim
+  waitUntilAtual?.(tarefa);
+}
+
+async function guardar(
+  cache: Cache,
+  key: string,
+  ttlSeconds: number,
+  value: unknown,
+): Promise<void> {
+  try {
+    await cache.put(
+      cacheUrl(key),
+      new Response(JSON.stringify(value), {
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': `public, max-age=${RETENCAO}`,
+          [HEADER_FRESCO_ATE]: String(Date.now() + ttlSeconds * 1000),
+        },
+      }),
+    );
+  } catch {
+    // falha ao gravar no cache nunca deve derrubar a resposta
+  }
+}
+
+/**
+ * Busca com cache de duas camadas e stale-while-revalidate.
+ *
+ * A cópia velha é devolvida na hora e a atualização acontece em segundo plano.
+ * Isso existe por uma medição: em produção, a primeira visita a uma página de
+ * competição chegou a **16 segundos** de TTFB (o loader dispara 5 raspagens em
+ * paralelo), contra 0,2 s com cache quente. Sem esta função, todo primeiro
+ * visitante depois de cada expiração pagava essa conta.
+ */
 export async function cached<T>(
   key: string,
   ttlSeconds: number,
@@ -61,9 +149,17 @@ export async function cached<T>(
       const stored = await cache.match(cacheUrl(key));
       if (stored) {
         const value = (await stored.json()) as T;
-        // o que sobrou do TTL: a entrada pode estar quase vencendo
-        const age = Number(stored.headers.get('age') ?? 0);
-        remember(key, Math.max(0, ttlSeconds - age), value);
+        const frescoAte = Number(stored.headers.get(HEADER_FRESCO_ATE) ?? 0);
+        const restante = Math.max(0, frescoAte - Date.now());
+
+        if (restante > 0) {
+          remember(key, restante / 1000, value);
+        } else {
+          // velha: entra no L1 por pouco tempo só para segurar as chamadas
+          // repetidas desta mesma requisição enquanto a atualização não volta
+          remember(key, 30, value);
+          revalidarEmSegundoPlano(key, ttlSeconds, fn, cache);
+        }
         return value;
       }
     } catch {
@@ -71,24 +167,10 @@ export async function cached<T>(
     }
   }
 
+  // primeira visita absoluta a esta chave: não há o que servir, tem que esperar
   const value = await fn();
   remember(key, ttlSeconds, value);
-
-  if (cache && value !== undefined) {
-    try {
-      await cache.put(
-        cacheUrl(key),
-        new Response(JSON.stringify(value), {
-          headers: {
-            'Content-Type': 'application/json',
-            'Cache-Control': `public, max-age=${ttlSeconds}`,
-          },
-        }),
-      );
-    } catch {
-      // falha ao gravar no cache nunca deve derrubar a resposta
-    }
-  }
+  if (cache && value !== undefined) await guardar(cache, key, ttlSeconds, value);
 
   return value;
 }

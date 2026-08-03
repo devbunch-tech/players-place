@@ -53,5 +53,15 @@ declare global {
      * rota aberta viraria vetor de abuso contra a origem.
      */
     FANTASY_APURACAO_TOKEN?: string;
+
+    /**
+     * Chave da YouTube Data API v3, usada para achar o vídeo de highlights da
+     * página do jogador. Opcional: sem ela o bloco vira um botão que abre a
+     * busca no YouTube, em vez de sumir ou quebrar.
+     *
+     * A cota gratuita é de 10.000 unidades/dia e cada busca custa 100 — daí o
+     * resultado ficar 7 dias em cache (ver lib/youtube.ts).
+     */
+    YOUTUBE_API_KEY?: string;
   }
 }

@@ -12,6 +12,7 @@ import {
   parseLeagueOverview,
   parseMarketPlayers,
   parsePlayer,
+  parsePlayerInjuries,
   parseMatchGoals,
   parseRoundFirstKickoff,
   parseMatchPreview,
@@ -34,6 +35,7 @@ import {
   type MatchPreview,
   type MarketPlayerPage,
   type MarketPlayerRow,
+  type PlayerInjury,
   type PlayerProfile,
   type RankedPlayer,
   type RoundFixture,
@@ -497,6 +499,19 @@ export function getClubTransfers(
 export function getPlayer(id: string): Promise<PlayerProfile> {
   return cached(`player:${id}`, 6 * HOUR, async () =>
     parsePlayer(await tmHtml(`/-/profil/spieler/${id}`)),
+  );
+}
+
+/**
+ * Histórico de lesões da carreira.
+ *
+ * TTL longo porque é passado: só muda quando o jogador se lesiona de novo, e
+ * a lesão em curso vem de outra fonte (a página de desfalques do clube, que
+ * tem previsão de retorno — ver `getClubAbsences`).
+ */
+export function getPlayerInjuries(id: string): Promise<PlayerInjury[]> {
+  return cached(`pinjuries:${id}`, 12 * HOUR, async () =>
+    parsePlayerInjuries(await tmHtml(`/-/verletzungen/spieler/${id}`)),
   );
 }
 

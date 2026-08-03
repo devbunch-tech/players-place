@@ -1275,3 +1275,53 @@ export function parseClubFixtures(html: string): ClubMatch[] {
 
   return out;
 }
+
+export interface PlayerInjury {
+  /** "25/26" */
+  season: string;
+  /** "Lesão na panturrilha", "Operado ao joelho"… */
+  type: string;
+  /** dd/mm/aaaa */
+  from: string;
+  /** dd/mm/aaaa; vazio quando a lesão ainda está em curso */
+  until: string;
+  /** "36 dias" */
+  days: string;
+  /** partidas que o jogador perdeu por causa dela */
+  gamesMissed: string;
+}
+
+/**
+ * Histórico de lesões de `/-/verletzungen/spieler/{id}`.
+ *
+ * A página tem duas tabelas `.items`: a primeira é lesão a lesão (6 colunas:
+ * Temporada · Lesão · de · até · Dias · Jogos perdidos) e a segunda é o
+ * resumo por temporada. Só a primeira interessa — daí ler apenas `[0]`.
+ */
+export function parsePlayerInjuries(html: string): PlayerInjury[] {
+  const root = parse(html);
+  const table = root.querySelectorAll('table.items')[0];
+  if (!table) return [];
+
+  const out: PlayerInjury[] = [];
+  for (const tr of table.querySelectorAll('tbody > tr')) {
+    const tds = tr.querySelectorAll(':scope > td');
+    // linhas de cabeçalho e rodapé aparecem no mesmo tbody
+    if (tds.length < 6) continue;
+
+    const season = clean(tds[0]?.text);
+    const type = clean(tds[1]?.text);
+    if (!season || !type) continue;
+
+    out.push({
+      season,
+      type,
+      from: clean(tds[2]?.text),
+      // "-" e "?" são como o Transfermarkt marca lesão sem data de retorno
+      until: clean(tds[3]?.text).replace(/^[-?]$/, ''),
+      days: clean(tds[4]?.text),
+      gamesMissed: clean(tds[5]?.text),
+    });
+  }
+  return out;
+}

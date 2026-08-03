@@ -1,8 +1,11 @@
 import {Link} from 'react-router';
 import type {Route} from './+types/jogadores.$id';
 import {
+  ehSuspensao,
+  getClubAbsences,
   getPlayer,
   getPlayerCareer,
+  getPlayerInjuries,
   getPlayerGameLog,
   getPlayerMarketValueGraph,
   getPlayerNationalCareer,
@@ -18,6 +21,8 @@ import {PerformancePanel} from '~/components/Performance';
 import {PositionsPitch} from '~/components/PositionsPitch';
 import {MatchLog} from '~/components/MatchLog';
 import {StartsPanel} from '~/components/Starts';
+import {InjuryHistory, InjuryStatus} from '~/components/Injuries';
+import {Highlights} from '~/components/Highlights';
 import {
   CareerByClub,
   CareerTotalsTable,
@@ -25,6 +30,7 @@ import {
 } from '~/components/CareerPanels';
 import {VideoAnalysis} from '~/components/VideoAnalysis';
 import {getSponsorVideos} from '~/lib/sponsors';
+import {getPlayerHighlight} from '~/lib/youtube';
 import {breadcrumbLd, canonical, ldJson, semPontoFinal, seo} from '~/lib/seo';
 
 /** "05/02/1992 (33)" → "1992-02-05"; qualquer outro formato vira null */
@@ -97,7 +103,7 @@ export const meta: Route.MetaFunction = ({data, params}) => {
   ];
 };
 
-export async function loader({params}: Route.LoaderArgs) {
+export async function loader({params, context}: Route.LoaderArgs) {
   const [
     player,
     transfers,
@@ -107,6 +113,7 @@ export async function loader({params}: Route.LoaderArgs) {
     national,
     gameLog,
     starts,
+    injuries,
   ] = await Promise.all([
     getPlayer(params.id).catch(() => null),
     getPlayerTransfers(params.id).catch(() => []),
@@ -116,12 +123,31 @@ export async function loader({params}: Route.LoaderArgs) {
     getPlayerNationalCareer(params.id).catch(() => []),
     getPlayerGameLog(params.id).catch(() => null),
     getPlayerStartsBySeason(params.id).catch(() => []),
+    getPlayerInjuries(params.id).catch(() => []),
   ]);
   if (!player || !player.name) {
     throw new Response('Não foi possível carregar este jogador agora.', {
       status: 502,
     });
   }
+
+  // A lesão EM CURSO só existe na página de desfalques do clube — é a única
+  // com previsão de retorno. Depende do `player`, então vem depois do bloco
+  // acima; o cache de 2h é o mesmo que o Fantasy já aquece.
+  const [absence, highlight] = await Promise.all([
+    player.club
+      ? getClubAbsences(player.club.id)
+          .then(
+            (todos) =>
+              todos.find(
+                (a) => a.playerId === params.id && !ehSuspensao(a.reason),
+              ) ?? null,
+          )
+          .catch(() => null)
+      : Promise.resolve(null),
+    // depende do nome, então só pode rodar depois do `player`
+    getPlayerHighlight(params.id, player.name, context.env.YOUTUBE_API_KEY),
+  ]);
 
   // variação percentual entre os dois últimos pontos do histórico
   let delta: number | null = null;
@@ -152,6 +178,9 @@ export async function loader({params}: Route.LoaderArgs) {
     national,
     gameLog,
     starts,
+    injuries,
+    absence,
+    highlight,
     videos: getSponsorVideos(params.id),
   };
 }
@@ -181,6 +210,9 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
     national,
     gameLog,
     starts,
+    injuries,
+    absence,
+    highlight,
     videos,
   } = loaderData;
   const isGoalkeeper = Boolean(player.info['Posição']?.includes('Goleiro'));
@@ -240,6 +272,10 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
         </Link>
       </div>
 
+      {/* logo abaixo do nome: estar fora por lesão é a primeira coisa que quem
+          abre a página do jogador precisa saber */}
+      <InjuryStatus absence={absence} />
+
       {/* min-w-0 nas colunas: sem isso o min-content das tabelas largas
           estica o grid e a página inteira rola na horizontal no celular */}
       <div className="mt-6 grid gap-10 lg:grid-cols-[1fr_340px]">
@@ -289,6 +325,8 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
 
           {starts.length > 0 ? <StartsPanel rows={starts} /> : null}
 
+          <InjuryHistory rows={injuries} />
+
           {gameLog?.seasons.length ? (
             <MatchLog seasons={gameLog.seasons} />
           ) : null}
@@ -296,6 +334,8 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
           {career ? (
             <CareerTotalsTable career={career} isGoalkeeper={isGoalkeeper} />
           ) : null}
+
+          <Highlights video={highlight} playerName={player.name} />
 
           <VideoAnalysis videos={videos} />
 

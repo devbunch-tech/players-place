@@ -12,8 +12,15 @@ import type {RotuloVaga} from '~/lib/tm/positions';
 
 /** acerto em cheio no número */
 export const PONTOS_ACERTO = 3;
-/** qualquer erro, por maior ou menor que seja */
-export const PONTOS_ERRO = -3;
+/**
+ * Erro não penaliza. Junto com `ZERO_CONTA_COMO_APOSTA = false`, é a regra que
+ * a simulação abaixo apontou como a única que premia participar: quem arrisca
+ * pode ganhar e não pode perder, e quem escala tudo com 0 fica em zero.
+ *
+ * Ficou em -3 por um tempo, contradizendo a decisão medida e mantendo de pé o
+ * incentivo a não jogar.
+ */
+export const PONTOS_ERRO = 0;
 
 /**
  * Se true, palpitar 0 conta como aposta (acerto pontua, erro penaliza).
@@ -52,7 +59,7 @@ export interface PickPontuavel {
   actualAssists: number;
 }
 
-/** Gols e assistências são avaliados separadamente: -6 a +6 por jogador. */
+/** Gols e assistências são avaliados separadamente: 0 a +6 por jogador. */
 export function pontuarPick(p: PickPontuavel): number {
   return (
     pontuarEstatistica(p.predGoals, p.actualGoals) +

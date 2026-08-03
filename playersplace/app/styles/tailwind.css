@@ -85,3 +85,24 @@
 @utility pp-pulse {
   animation: ppPulse 1.4s infinite;
 }
+
+/* bola do indicador de carregamento — rola girando e avançando um pouco */
+@keyframes ppRolar {
+  from {
+    transform: translateX(-3px) rotate(0deg);
+  }
+  to {
+    transform: translateX(3px) rotate(360deg);
+  }
+}
+
+@utility pp-rolar {
+  animation: ppRolar 0.9s linear infinite alternate;
+}
+
+/* respeita quem pediu menos movimento no sistema */
+@media (prefers-reduced-motion: reduce) {
+  .pp-rolar {
+    animation: none;
+  }
+}
