@@ -25,11 +25,29 @@ const LIGA = 'BRA1';
 const CANAL_NOME = 'Na Torcida Vascaínos';
 const CANAL_URL: string | null = 'https://www.youtube.com/@natorcidavascaino';
 
-const PREMIOS = [
+interface Premio {
+  posicao: string;
+  premio: string;
+  destaque: boolean;
+  /**
+   * Arte do prêmio, servida de `public/`. Fica local de propósito: hospedar em
+   * CDN de terceiro exigiria liberar o domínio no `imgSrc` do CSP
+   * (entry.server.tsx) e deixaria a página refém de um link que some.
+   *
+   * Se o arquivo não existir, o `onError` esconde a imagem e o card volta ao
+   * formato só de texto — nunca aparece ícone de imagem quebrada.
+   */
+  imagem?: string;
+  imagemAlt?: string;
+}
+
+const PREMIOS: Premio[] = [
   {
     posicao: '1º lugar',
     premio: 'EA FC 27 Edição Standard para o seu console',
     destaque: true,
+    imagem: '/premios/ea-fc-27.jpg',
+    imagemAlt: 'Arte do jogo EA FC 27',
   },
   {
     posicao: '2º lugar',
@@ -164,7 +182,11 @@ export default function Fantasy({loaderData}: Route.ComponentProps) {
           {PREMIOS.map((p) => (
             <div
               key={p.posicao}
-              className={`flex items-start gap-4 rounded-card p-4 ${
+              // `items-center`: com a arte o card fica com a altura dela, e
+              // alinhar pelo topo deixaria o texto de uma linha só flutuando
+              // num vazio no desktop. `flex-wrap` deixa a arte cair para a
+              // linha de baixo no celular (ver a largura dela).
+              className={`flex flex-wrap items-center gap-4 rounded-card p-4 ${
                 p.destaque
                   ? 'bg-pitch text-white'
                   : 'border border-line bg-card'
@@ -178,10 +200,30 @@ export default function Fantasy({loaderData}: Route.ComponentProps) {
                 {p.posicao}
               </span>
               <span
-                className={`text-sm font-semibold ${p.destaque ? '' : 'text-ink'}`}
+                className={`min-w-0 flex-1 text-sm font-semibold ${p.destaque ? '' : 'text-ink'}`}
               >
                 {p.premio}
               </span>
+              {p.imagem ? (
+                <img
+                  src={p.imagem}
+                  alt={p.imagemAlt ?? p.premio}
+                  width={192}
+                  height={108}
+                  loading="lazy"
+                  // 16:9 porque a arte é a key art horizontal do jogo, não a
+                  // capa vertical de caixa — num slot 3:4 o corte central
+                  // comeria o logo "EA SPORTS FC 27".
+                  // `w-full` no celular força a quebra de linha do flex-wrap:
+                  // a arte ganha a largura toda em vez de espremer o texto.
+                  className="aspect-video w-full shrink-0 rounded-md object-cover ring-1 ring-white/20 sm:w-48"
+                  // arquivo ausente não pode virar ícone de imagem quebrada:
+                  // some a arte e o card segue como os outros, só com texto
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                  }}
+                />
+              ) : null}
             </div>
           ))}
         </div>
