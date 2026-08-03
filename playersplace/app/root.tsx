@@ -15,8 +15,26 @@ import favicon from '~/assets/favicon.svg';
 import tailwindStyles from '~/styles/tailwind.css?url';
 import {Header, Footer} from '~/components/Shell';
 import {resolveProState} from '~/lib/pro';
+import {SITE_DESCRIPTION, SITE_NAME, seo} from '~/lib/seo';
 
 export type RootLoader = typeof loader;
+
+/**
+ * O React Router só renderiza o `meta` da rota mais profunda, e todas as
+ * páginas do site exportam o seu — então este aqui só aparece quando o
+ * ErrorBoundary abaixo entra no lugar da página (404 e 500).
+ *
+ * Daí o `noindex` e a ausência de canônica: o status HTTP já mantém a página
+ * fora do índice, e apontar uma canônica seria afirmar que aquele endereço
+ * existe.
+ */
+export const meta: Route.MetaFunction = () =>
+  seo({
+    title: `${SITE_NAME} — o mercado da bola em números`,
+    description: SITE_DESCRIPTION,
+    brandInTitle: true,
+    noindex: true,
+  });
 
 export const shouldRevalidate: ShouldRevalidateFunction = ({
   formMethod,
@@ -41,10 +59,16 @@ export function links() {
       rel: 'stylesheet',
       href: 'https://fonts.googleapis.com/css2?family=Archivo:wght@400..800&family=Bricolage+Grotesque:wght@500..800&family=Space+Grotesk:wght@700&display=swap',
     },
+    // fotos de jogador e escudos vêm todos deste CDN — abrir a conexão junto
+    // com a página economiza o handshake no primeiro <img>
+    {rel: 'preconnect', href: 'https://tmssl.akamaized.net'},
     {rel: 'icon', type: 'image/svg+xml', href: favicon},
     // PNG para quem não renderiza favicon SVG (Safari antigo) e para iOS
     {rel: 'icon', type: 'image/png', sizes: '512x512', href: '/icone-app-512.png'},
     {rel: 'apple-touch-icon', href: '/apple-touch-icon.png'},
+    // `.json` e não `.webmanifest`: o servidor de estáticos do Oxygen só
+    // entrega extensões que conhece, e um .webmanifest cai no 404 do app
+    {rel: 'manifest', href: '/manifest.json'},
   ];
 }
 
@@ -62,6 +86,7 @@ export function Layout({children}: {children?: React.ReactNode}) {
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <meta name="theme-color" content="#0E4632" />
         <link rel="stylesheet" href={tailwindStyles}></link>
         <Meta />
         <Links />

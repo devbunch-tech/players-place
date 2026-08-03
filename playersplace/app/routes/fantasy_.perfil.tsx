@@ -8,12 +8,18 @@ import {getCustomerId} from '~/lib/pro';
 import {createDb} from '~/lib/db';
 import {buscarPerfil, resumoDoJogador} from '~/lib/fantasy.server';
 import {SectionTitle} from '~/components/ui';
+import {canonical, seo} from '~/lib/seo';
 
 const LIGA = 'BRA1';
 
-export const meta: Route.MetaFunction = () => [
-  {title: 'Meu perfil · Game Fantasy · Players Place'},
-];
+// área logada: nada aqui deve entrar no índice
+export const meta: Route.MetaFunction = () =>
+  seo({
+    title: 'Meu perfil · Game Fantasy',
+    description: 'Sua pontuação, sua última escalação e seus dados no game.',
+    url: canonical('/fantasy/perfil'),
+    noindex: true,
+  });
 
 export async function loader({context}: Route.LoaderArgs) {
   const cliente = await getCustomerId(context);

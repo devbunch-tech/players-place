@@ -25,10 +25,77 @@ import {
 } from '~/components/CareerPanels';
 import {VideoAnalysis} from '~/components/VideoAnalysis';
 import {getSponsorVideos} from '~/lib/sponsors';
+import {breadcrumbLd, canonical, ldJson, semPontoFinal, seo} from '~/lib/seo';
 
-export const meta: Route.MetaFunction = ({data}) => [
-  {title: data ? `${data.player.name} · Players Place` : 'Jogador · Players Place'},
-];
+/** "05/02/1992 (33)" → "1992-02-05"; qualquer outro formato vira null */
+function birthDateISO(nascIdade: string | undefined): string | null {
+  const m = nascIdade?.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
+}
+
+export const meta: Route.MetaFunction = ({data, params}) => {
+  const url = canonical(`/jogadores/${data?.id ?? params.id}`);
+
+  if (!data) {
+    return seo({
+      title: 'Jogador',
+      description:
+        'Valor de mercado, histórico de valorização, transferências e desempenho por temporada.',
+      url,
+    });
+  }
+
+  const {player} = data;
+  const posicao = player.info['Posição']?.split(' - ').pop() ?? null;
+  const idade = player.info['Nasc./Idade']?.match(/\((\d+)\)/)?.[1] ?? null;
+  const nacionalidade = player.info['Nacionalidade'] ?? null;
+  const nascimento = birthDateISO(player.info['Nasc./Idade']);
+
+  const ficha = [posicao, idade ? `${idade} anos` : null, nacionalidade]
+    .filter(Boolean)
+    .join(', ');
+  // parênteses em vez de "do/da": nome de clube não tem gênero previsível
+  const clube = player.club ? ` (${player.club.name})` : '';
+
+  return [
+    ...seo({
+      title: `${player.name} — valor de mercado, estatísticas e transferências`,
+      description: `${player.name}${clube}${ficha ? `: ${ficha}` : ''}. Valor de mercado ${semPontoFinal(player.marketValue)}, histórico de valorização, transferências e estatísticas por temporada.`,
+      url,
+      image: player.photo,
+      imageAlt: `Foto de ${player.name}`,
+      type: 'profile',
+    }),
+    breadcrumbLd([
+      {name: 'Início', path: '/'},
+      ...(player.club
+        ? [{name: player.club.name, path: `/clubes/${player.club.id}`}]
+        : []),
+      {name: player.name, path: `/jogadores/${data.id}`},
+    ]),
+    ldJson({
+      '@context': 'https://schema.org',
+      '@type': 'Person',
+      name: player.name,
+      url,
+      ...(player.photo ? {image: player.photo} : {}),
+      ...(posicao ? {jobTitle: posicao} : {}),
+      ...(nacionalidade ? {nationality: nacionalidade} : {}),
+      ...(nascimento ? {birthDate: nascimento} : {}),
+      ...(player.info['Altura'] ? {height: player.info['Altura']} : {}),
+      ...(player.club
+        ? {
+            memberOf: {
+              '@type': 'SportsTeam',
+              name: player.club.name,
+              sport: 'Futebol',
+              url: canonical(`/clubes/${player.club.id}`),
+            },
+          }
+        : {}),
+    }),
+  ];
+};
 
 export async function loader({params}: Route.LoaderArgs) {
   const [

@@ -8,10 +8,68 @@ import {AdSlot} from '~/components/AdSlot';
 import {ClubSignings} from '~/components/ClubSignings';
 import {ClubFormSection} from '~/components/ClubForm';
 import {ProCard} from '~/components/ProCard';
+import {breadcrumbLd, canonical, ldJson, semPontoFinal, seo} from '~/lib/seo';
 
-export const meta: Route.MetaFunction = ({data}) => [
-  {title: data ? `${data.club.name} · Players Place` : 'Clube · Players Place'},
-];
+export const meta: Route.MetaFunction = ({data, params}) => {
+  // ?temporada= é um recorte das contratações dentro da mesma página do clube
+  const url = canonical(`/clubes/${data?.id ?? params.id}`);
+
+  if (!data) {
+    return seo({
+      title: 'Clube',
+      description:
+        'Elenco completo, valores de mercado, contratações e calendário do clube.',
+      url,
+    });
+  }
+
+  const {club, league, avgAge} = data;
+  // parênteses em vez de "da/do": nome de competição não tem gênero previsível
+  const naLiga = club.league ? ` (${club.league.name})` : '';
+
+  return [
+    ...seo({
+      title: `${club.name} — elenco, valores de mercado e contratações`,
+      description: `${club.name}${naLiga}: elenco com ${club.players.length} jogadores, ${semPontoFinal(club.totalValue)} em valor de mercado e média de idade de ${avgAge} anos. Contratações, calendário e resultados.`,
+      url,
+      image: club.crest,
+      imageAlt: `Escudo do ${club.name}`,
+    }),
+    breadcrumbLd([
+      {name: 'Início', path: '/'},
+      {name: 'Competições', path: '/competicoes'},
+      ...(club.league
+        ? [{name: club.league.name, path: `/competicoes/${club.league.code}`}]
+        : []),
+      {name: club.name, path: `/clubes/${data.id}`},
+    ]),
+    ldJson({
+      '@context': 'https://schema.org',
+      '@type': 'SportsTeam',
+      name: club.name,
+      sport: 'Futebol',
+      url,
+      ...(club.crest ? {logo: club.crest} : {}),
+      ...(club.league
+        ? {
+            memberOf: {
+              '@type': 'SportsOrganization',
+              name: club.league.name,
+              url: canonical(`/competicoes/${club.league.code}`),
+            },
+          }
+        : {}),
+      ...(league ? {location: {'@type': 'Country', name: league.country}} : {}),
+      // o elenco em `athlete` é o que liga a entidade do clube às páginas
+      // dos jogadores para o robô — 30 é folga suficiente para qualquer elenco
+      athlete: club.players.slice(0, 30).map((p) => ({
+        '@type': 'Person',
+        name: p.name,
+        url: canonical(`/jogadores/${p.id}`),
+      })),
+    }),
+  ];
+};
 
 export async function loader({params, request}: Route.LoaderArgs) {
   const season = new URL(request.url).searchParams.get('temporada');

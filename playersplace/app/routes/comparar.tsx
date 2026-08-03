@@ -14,18 +14,26 @@ import {euroToMillions} from '~/lib/format';
 import {Avatar, EmptyNote, SectionTitle} from '~/components/ui';
 import {AdSlot} from '~/components/AdSlot';
 import {ProCard} from '~/components/ProCard';
+import {canonical, seo} from '~/lib/seo';
 
 export const MAX_PLAYERS = 3;
 
 export const meta: Route.MetaFunction = ({data}) => {
   const names = data?.slots.map((s) => s.player.name) ?? [];
-  return [
-    {
-      title: names.length
-        ? `${names.join(' × ')} · Comparar · Players Place`
-        : 'Comparar jogadores · Players Place',
-    },
-  ];
+
+  // a página vazia é uma ferramenta que vale indexar; cada combinação de
+  // ?p= é uma das milhões possíveis e ficaria fora do índice de qualquer
+  // jeito — melhor dizer isso do que deixar o robô gastar rastreio nelas
+  return seo({
+    title: names.length
+      ? `${names.join(' × ')} — comparação de jogadores`
+      : 'Comparar jogadores lado a lado',
+    description: names.length
+      ? `Comparação entre ${names.join(', ')}: valor de mercado, pico de valorização, gols, assistências e minutos por temporada.`
+      : 'Escolha até três jogadores e compare valor de mercado, valorização, gols, assistências e minutos em jogo lado a lado.',
+    url: canonical('/comparar'),
+    noindex: names.length > 0,
+  });
 };
 
 interface Slot {

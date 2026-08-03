@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Archivo:wght@400..800&family=Bricolage+Grotesque:wght@600..800&family=Space+Grotesk:wght@700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1200px; height: 630px; }
+      body {
+        background: #0e4632;
+        font-family: 'Archivo', system-ui, sans-serif;
+        color: #f6f4ed;
+        position: relative;
+        overflow: hidden;
+      }
+      /* linhas de campo, bem discretas */
+      .pitch {
+        position: absolute; inset: 0;
+        background-image:
+          radial-gradient(circle at 100% 50%, rgba(200,240,75,0.16), transparent 55%),
+          linear-gradient(180deg, rgba(255,255,255,0.05) 0%, transparent 40%);
+      }
+      .lines { position: absolute; inset: 0; opacity: 0.10; }
+      .wrap {
+        position: relative;
+        height: 100%;
+        padding: 72px 80px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .lockup { display: flex; align-items: center; gap: 18px; }
+      .mark { width: 74px; height: 74px; }
+      .word {
+        font-family: 'Space Grotesk', sans-serif;
+        font-weight: 700;
+        font-size: 46px;
+        letter-spacing: -1.5px;
+        line-height: 1;
+      }
+      .word .lime { color: #c8f04b; }
+      h1 {
+        font-family: 'Bricolage Grotesque', 'Archivo', sans-serif;
+        font-weight: 800;
+        font-size: 86px;
+        line-height: 0.98;
+        letter-spacing: -3.2px;
+        max-width: 900px;
+      }
+      h1 .hl {
+        background: #c8f04b;
+        color: #131711;
+        border-radius: 12px;
+        padding: 0 14px 6px;
+        box-decoration-break: clone;
+      }
+      p.sub {
+        margin-top: 26px;
+        font-size: 27px;
+        font-weight: 500;
+        line-height: 1.4;
+        color: rgba(246,244,237,0.82);
+        max-width: 830px;
+      }
+      .foot { display: flex; align-items: center; gap: 14px; }
+      .chips { display: flex; gap: 10px; flex-wrap: wrap; }
+      .chip {
+        border: 2px solid rgba(246,244,237,0.28);
+        border-radius: 999px;
+        padding: 9px 20px;
+        font-size: 21px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+      }
+      .domain {
+        margin-left: auto;
+        font-size: 23px;
+        font-weight: 800;
+        color: #c8f04b;
+        letter-spacing: -0.3px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="pitch"></div>
+    <svg class="lines" viewBox="0 0 1200 630" fill="none" stroke="#f6f4ed" stroke-width="3">
+      <circle cx="1200" cy="315" r="150" />
+      <rect x="1090" y="175" width="200" height="280" />
+      <line x1="1200" y1="0" x2="1200" y2="630" />
+    </svg>
+
+    <div class="wrap">
+      <div class="lockup">
+        <svg class="mark" viewBox="0 0 64 64" fill="none">
+          <path
+            d="M8 50 L24 34 L32 42 L48 22"
+            stroke="#F6F4ED"
+            stroke-width="7"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+          <circle cx="52.5" cy="16" r="6.5" fill="#C8F04B" />
+        </svg>
+        <div class="word">Players<span class="lime">Place</span></div>
+      </div>
+
+      <div>
+        <h1>O mercado da bola<br /><span class="hl">em números</span>.</h1>
+        <p class="sub">
+          Valores de mercado, elencos, transferências e estatísticas das
+          principais ligas do mundo — em tempo real.
+        </p>
+      </div>
+
+      <div class="foot">
+        <div class="chips">
+          <span class="chip">Brasileirão</span>
+          <span class="chip">Premier League</span>
+          <span class="chip">LaLiga</span>
+          <span class="chip">Serie A</span>
+          <span class="chip">Bundesliga</span>
+        </div>
+        <div class="domain">playersplace.com.br</div>
+      </div>
+    </div>
+  </body>
+</html>

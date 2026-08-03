@@ -3,14 +3,19 @@ import type {Route} from './+types/fantasy';
 import {getLeagueStandings} from '~/lib/tm';
 import {resolveProState} from '~/lib/pro';
 import {SectionTitle} from '~/components/ui';
+import {breadcrumbLd, canonical, seo} from '~/lib/seo';
 
 export const meta: Route.MetaFunction = () => [
-  {title: 'Game Fantasy · Players Place'},
-  {
-    name: 'description',
-    content:
-      'Monte sua escalação da rodada do Brasileirão, acerte as estatísticas dos jogadores e concorra a prêmios.',
-  },
+  ...seo({
+    title: 'Game Fantasy do Brasileirão — escale seu time e concorra a prêmios',
+    description:
+      'Monte sua escalação da rodada do Brasileirão, acerte gols e assistências dos jogadores e dispute o ranking mensal por prêmios. Grátis para jogar.',
+    url: canonical('/fantasy'),
+  }),
+  breadcrumbLd([
+    {name: 'Início', path: '/'},
+    {name: 'Game Fantasy', path: '/fantasy'},
+  ]),
 ];
 
 /** o game vale só para o Brasileirão Série A */

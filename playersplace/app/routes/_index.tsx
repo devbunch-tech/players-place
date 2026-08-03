@@ -7,14 +7,25 @@ import {euroToMillions, todayLabel} from '~/lib/format';
 import {Avatar, Crest, FeeTag, LeagueLogo, SectionTitle} from '~/components/ui';
 import {AdSlot} from '~/components/AdSlot';
 import {ProCard} from '~/components/ProCard';
+import {
+  SITE_DESCRIPTION,
+  canonical,
+  organizationLd,
+  seo,
+  websiteLd,
+} from '~/lib/seo';
 
 export const meta: Route.MetaFunction = () => [
-  {title: 'Players Place — o mercado da bola em números'},
-  {
-    name: 'description',
-    content:
-      'Valores de mercado, elencos e transferências das principais ligas do mundo.',
-  },
+  ...seo({
+    title: 'Players Place — o mercado da bola em números',
+    description: SITE_DESCRIPTION,
+    url: canonical('/'),
+    brandInTitle: true,
+  }),
+  // identidade da marca e caixa de busca do Google: só aqui, para não
+  // repetir o mesmo bloco em todas as páginas do site
+  organizationLd(),
+  websiteLd(),
 ];
 
 export async function loader() {

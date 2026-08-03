@@ -5,10 +5,33 @@ import {getGlobalTopPlayers, getLeagueTopPlayers} from '~/lib/tm';
 import {Avatar, ChipLink, EmptyNote} from '~/components/ui';
 import {AdSlot} from '~/components/AdSlot';
 import {ProCard} from '~/components/ProCard';
+import {breadcrumbLd, canonical, seo} from '~/lib/seo';
 
-export const meta: Route.MetaFunction = () => [
-  {title: 'Valores de mercado · Players Place'},
-];
+export const meta: Route.MetaFunction = ({data}) => {
+  const league = data?.league ?? null;
+  // aqui o ?liga= entra na canônica: cada liga é um ranking diferente, com
+  // conteúdo próprio, e não um filtro cosmético da mesma lista
+  const url = canonical('/valores', {liga: league?.code});
+
+  return [
+    ...seo({
+      title: league
+        ? `Jogadores mais valiosos da ${league.name}`
+        : 'Valores de mercado — os jogadores mais valiosos do mundo',
+      description: league
+        ? `Ranking dos 25 jogadores de maior valor de mercado da ${league.name} (${league.country}), com posição, idade, clube e valor atualizado.`
+        : 'Ranking dos 25 jogadores de maior valor de mercado do futebol mundial, com posição, idade, clube e valor atualizado em tempo real.',
+      url,
+    }),
+    breadcrumbLd([
+      {name: 'Início', path: '/'},
+      {name: 'Valores de mercado', path: '/valores'},
+      ...(league
+        ? [{name: league.name, path: `/valores?liga=${league.code}`}]
+        : []),
+    ]),
+  ];
+};
 
 export async function loader({request}: Route.LoaderArgs) {
   const url = new URL(request.url);

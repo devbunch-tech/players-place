@@ -4,14 +4,19 @@ import {searchAll} from '~/lib/tm';
 import {Avatar, Crest, EmptyNote, SectionTitle} from '~/components/ui';
 import {AdSlot} from '~/components/AdSlot';
 import {ProCard} from '~/components/ProCard';
+import {canonical, seo} from '~/lib/seo';
 
-export const meta: Route.MetaFunction = ({data}) => [
-  {
-    title: data?.q
-      ? `“${data.q}” · Busca · Players Place`
-      : 'Busca · Players Place',
-  },
-];
+export const meta: Route.MetaFunction = ({data}) =>
+  // resultado de busca interna é exatamente o que o Google pede para manter
+  // fora do índice; `follow` continua valendo, então os links descobertos
+  // aqui levam o robô às páginas de jogador e clube
+  seo({
+    title: data?.q ? `“${data.q}” — resultados da busca` : 'Busca',
+    description:
+      'Pesquise qualquer jogador ou clube e veja valor de mercado, elenco, estatísticas e transferências.',
+    url: canonical('/busca'),
+    noindex: true,
+  });
 
 export async function loader({request}: Route.LoaderArgs) {
   const url = new URL(request.url);

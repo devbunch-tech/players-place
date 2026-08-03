@@ -1,6 +1,7 @@
 import {Form, Link} from 'react-router';
 import type {Route} from './+types/canais';
 import {productConfig} from '~/lib/commerce';
+import {breadcrumbLd, canonical, ldJson, seo} from '~/lib/seo';
 
 export async function loader({request, context}: Route.LoaderArgs) {
   return {
@@ -11,12 +12,40 @@ export async function loader({request, context}: Route.LoaderArgs) {
 }
 
 export const meta: Route.MetaFunction = () => [
-  {title: 'Para canais de YouTube · Players Place'},
-  {
-    name: 'description',
-    content:
-      'Publique sua análise em vídeo na página do jogador: R$ 10 por vídeo ou R$ 100/mês por vídeos ilimitados.',
-  },
+  ...seo({
+    title: 'Para canais de YouTube — publique sua análise na página do jogador',
+    description:
+      'Publique sua vídeo-análise direto na página do jogador no Players Place: R$ 10 por vídeo avulso ou R$ 100/mês por vídeos ilimitados com prioridade de exibição.',
+    url: canonical('/canais'),
+  }),
+  breadcrumbLd([
+    {name: 'Início', path: '/'},
+    {name: 'Para canais', path: '/canais'},
+  ]),
+  ldJson({
+    '@context': 'https://schema.org',
+    '@type': 'Service',
+    name: 'Vídeo-análise patrocinada no Players Place',
+    serviceType: 'Publicidade para canais de futebol',
+    provider: {'@type': 'Organization', name: 'Players Place'},
+    areaServed: 'BR',
+    offers: [
+      {
+        '@type': 'Offer',
+        name: 'Vídeo avulso',
+        price: '10.00',
+        priceCurrency: 'BRL',
+        url: canonical('/canais'),
+      },
+      {
+        '@type': 'Offer',
+        name: 'Plano de canal — vídeos ilimitados',
+        price: '100.00',
+        priceCurrency: 'BRL',
+        url: canonical('/canais'),
+      },
+    ],
+  }),
 ];
 
 const BENEFITS = [

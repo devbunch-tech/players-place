@@ -2,9 +2,47 @@ import {Form, Link} from 'react-router';
 import type {Route} from './+types/pro';
 import {resolveProState} from '~/lib/pro';
 import {productConfig} from '~/lib/commerce';
+import {SITE_URL, breadcrumbLd, canonical, ldJson, seo} from '~/lib/seo';
 
 export const meta: Route.MetaFunction = () => [
-  {title: 'Players Place PRO — sem anúncios por R$ 5/mês'},
+  ...seo({
+    title: 'Players Place PRO — sem anúncios por R$ 5/mês',
+    description:
+      'Assine o PRO por R$ 5/mês e navegue por todas as ligas, elencos e valores de mercado sem nenhum anúncio, com acesso antecipado a novos recursos.',
+    url: canonical('/pro'),
+    brandInTitle: true,
+  }),
+  breadcrumbLd([
+    {name: 'Início', path: '/'},
+    {name: 'PRO', path: '/pro'},
+  ]),
+  ldJson({
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: 'Players Place PRO',
+    description:
+      'Assinatura mensal que remove todos os anúncios do Players Place.',
+    brand: {'@type': 'Brand', name: 'Players Place'},
+    image: `${SITE_URL}/icone-app-512.png`,
+    offers: {
+      '@type': 'Offer',
+      url: canonical('/pro'),
+      price: '5.00',
+      priceCurrency: 'BRL',
+      availability: 'https://schema.org/InStock',
+      priceSpecification: {
+        '@type': 'UnitPriceSpecification',
+        price: '5.00',
+        priceCurrency: 'BRL',
+        // cobrança recorrente: sem isto o preço lido é o de uma compra única
+        referenceQuantity: {
+          '@type': 'QuantitativeValue',
+          value: 1,
+          unitCode: 'MON',
+        },
+      },
+    },
+  }),
 ];
 
 export async function loader({request, context}: Route.LoaderArgs) {

@@ -1,6 +1,6 @@
 import {Link} from 'react-router';
 import type {Route} from './+types/competicoes.$code';
-import {findLeague} from '~/lib/tm/leagues';
+import {findLeague, leagueLogo} from '~/lib/tm/leagues';
 import {
   getLeagueOverview,
   getLeagueStandings,
@@ -21,14 +21,51 @@ import {AdSlot} from '~/components/AdSlot';
 import {ProCard} from '~/components/ProCard';
 import {StatLeaders} from '~/components/StatLeaders';
 import {RoundFixtures, RoundNav} from '~/components/RoundFixtures';
+import {breadcrumbLd, canonical, ldJson, semPontoFinal, seo} from '~/lib/seo';
 
-export const meta: Route.MetaFunction = ({data}) => [
-  {
-    title: data
-      ? `${data.overview.name} · Players Place`
-      : 'Competição · Players Place',
-  },
-];
+export const meta: Route.MetaFunction = ({data, params}) => {
+  const code = (data?.code ?? params.code ?? '').toUpperCase();
+  // ?rodada= troca só o bloco de jogos: a página continua sendo a mesma
+  // competição, então a canônica aponta sempre para a versão sem parâmetro
+  const url = canonical(`/competicoes/${code}`);
+
+  if (!data) {
+    return seo({
+      title: 'Competição',
+      description:
+        'Tabela de classificação, artilheiros, clubes e valores de mercado da competição.',
+      url,
+    });
+  }
+
+  const {overview, league, totalValue, totalPlayers} = data;
+  const onde = league ? ` (${league.country})` : '';
+
+  return [
+    ...seo({
+      title: `${overview.name} — tabela, clubes e valores de mercado`,
+      description: `${overview.name}${onde}, temporada ${overview.season}: classificação, artilheiros, ${overview.clubs.length} clubes, ${totalPlayers} jogadores e ${semPontoFinal(totalValue)} em valor de mercado.`,
+      url,
+      // sem logo próprio de propósito: competição sem licença de imagem
+      // devolve um PNG transparente no CDN do Transfermarkt, e o card sairia
+      // em branco. A arte da marca é sempre visível.
+    }),
+    breadcrumbLd([
+      {name: 'Início', path: '/'},
+      {name: 'Competições', path: '/competicoes'},
+      {name: overview.name, path: `/competicoes/${code}`},
+    ]),
+    ldJson({
+      '@context': 'https://schema.org',
+      '@type': 'SportsOrganization',
+      name: overview.name,
+      sport: 'Futebol',
+      url,
+      logo: leagueLogo(code),
+      ...(league ? {location: {'@type': 'Country', name: league.country}} : {}),
+    }),
+  ];
+};
 
 export async function loader({params, request}: Route.LoaderArgs) {
   const code = params.code.toUpperCase();

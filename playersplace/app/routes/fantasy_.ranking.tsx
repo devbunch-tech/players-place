@@ -9,9 +9,22 @@ import type {Route} from './+types/fantasy_.ranking';
 import {getCustomerId} from '~/lib/pro';
 import {createDb} from '~/lib/db';
 import {rankingMensalNomeado} from '~/lib/fantasy.server';
+import {breadcrumbLd, canonical, seo} from '~/lib/seo';
 
 export const meta: Route.MetaFunction = () => [
-  {title: 'Ranking · Game Fantasy · Players Place'},
+  // ?mes= fica fora da canônica: rankings de meses passados são arquivo,
+  // e o que interessa ao buscador é sempre o mês corrente
+  ...seo({
+    title: 'Ranking do Game Fantasy — classificação do mês',
+    description:
+      'Classificação mensal do Game Fantasy do Brasileirão: quem mais acertou gols e assistências na rodada e está na disputa pelos prêmios do mês.',
+    url: canonical('/fantasy/ranking'),
+  }),
+  breadcrumbLd([
+    {name: 'Início', path: '/'},
+    {name: 'Game Fantasy', path: '/fantasy'},
+    {name: 'Ranking', path: '/fantasy/ranking'},
+  ]),
 ];
 
 /** 'YYYY-MM' no fuso de São Paulo — o mesmo corte usado pela view no banco */

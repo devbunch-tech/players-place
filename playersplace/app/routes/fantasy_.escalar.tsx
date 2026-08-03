@@ -30,12 +30,18 @@ import {
 } from '~/lib/tm/positions';
 import {Avatar, Crest} from '~/components/ui';
 import {FantasyPitch, type VagaCampo} from '~/components/FantasyPitch';
+import {canonical, seo} from '~/lib/seo';
 
 const LIGA = 'BRA1';
 
-export const meta: Route.MetaFunction = () => [
-  {title: 'Montar escalação · Game Fantasy · Players Place'},
-];
+// área logada: nada aqui deve entrar no índice
+export const meta: Route.MetaFunction = () =>
+  seo({
+    title: 'Montar escalação · Game Fantasy',
+    description: 'Escolha a formação e os jogadores da sua escalação da rodada.',
+    url: canonical('/fantasy/escalar'),
+    noindex: true,
+  });
 
 export async function loader({context}: Route.LoaderArgs) {
   const cliente = await getCustomerId(context);

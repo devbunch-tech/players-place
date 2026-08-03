@@ -4,9 +4,34 @@ import {LEAGUES, REGIONS} from '~/lib/tm/leagues';
 import {ChipLink, LeagueLogo} from '~/components/ui';
 import {AdSlot} from '~/components/AdSlot';
 import {ProCard} from '~/components/ProCard';
+import {absoluteUrl, breadcrumbLd, canonical, ldJson, seo} from '~/lib/seo';
 
 export const meta: Route.MetaFunction = () => [
-  {title: 'Competições · Players Place'},
+  // o filtro ?regiao= fica fora da canônica: é um recorte da mesma lista,
+  // e indexá-lo separado só criaria concorrência interna
+  ...seo({
+    title: 'Competições',
+    description: `As ${LEAGUES.length} ligas conectadas ao Players Place — ${LEAGUES.slice(0, 5)
+      .map((l) => l.name)
+      .join(', ')} e mais. Clubes, elencos e valores de mercado em tempo real.`,
+    url: canonical('/competicoes'),
+  }),
+  breadcrumbLd([
+    {name: 'Início', path: '/'},
+    {name: 'Competições', path: '/competicoes'},
+  ]),
+  ldJson({
+    '@context': 'https://schema.org',
+    '@type': 'ItemList',
+    name: 'Competições no Players Place',
+    numberOfItems: LEAGUES.length,
+    itemListElement: LEAGUES.map((l, i) => ({
+      '@type': 'ListItem',
+      position: i + 1,
+      name: l.name,
+      url: absoluteUrl(`/competicoes/${l.code}`),
+    })),
+  }),
 ];
 
 export default function Competicoes() {

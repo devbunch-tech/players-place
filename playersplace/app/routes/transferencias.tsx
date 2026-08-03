@@ -13,6 +13,7 @@ import {Avatar, Crest, EmptyNote, FeeTag, Pager} from '~/components/ui';
 import {AdSlot} from '~/components/AdSlot';
 import {ProCard} from '~/components/ProCard';
 import {SmartSearch} from '~/components/SmartSearch';
+import {breadcrumbLd, canonical, seo} from '~/lib/seo';
 
 const TABS = [
   {id: 'ultimas', label: 'Últimas'},
@@ -33,9 +34,49 @@ const SUBTITLE: Record<Tab, string> = {
   livres: 'Jogadores sem contrato, livres para assinar com qualquer clube.',
 };
 
-export const meta: Route.MetaFunction = () => [
-  {title: 'Transferências · Players Place'},
-];
+const TITLE: Record<Tab, string> = {
+  ultimas: 'Transferências — últimas movimentações do mercado',
+  recordes: 'Recordes de transferências — as maiores negociações da história',
+  contratos: 'Contratos a terminar — jogadores com vínculo chegando ao fim',
+  livres: 'Jogadores livres no mercado — sem contrato e livres para assinar',
+};
+
+const DESCRIPTION: Record<Tab, string> = {
+  ultimas:
+    'Todas as transferências confirmadas do futebol mundial, com clube de origem, clube de destino e valor pago em cada negociação.',
+  recordes:
+    'As maiores transferências da história do futebol, do recorde mundial para baixo, com valor, clubes envolvidos e ano da negociação.',
+  contratos:
+    'Jogadores com contrato chegando ao fim: os alvos mais prováveis da próxima janela, com clube atual, idade e valor de mercado.',
+  livres:
+    'Jogadores sem contrato, livres para assinar com qualquer clube sem custo de transferência. Posição, idade e valor de mercado.',
+};
+
+export const meta: Route.MetaFunction = ({data}) => {
+  const tab: Tab = data?.tab ?? 'ultimas';
+  // cada aba é uma lista diferente e merece indexação própria; a paginação
+  // (?page=) não entra, para as páginas 2+ não competirem com a primeira
+  const url = canonical(
+    '/transferencias',
+    tab === 'ultimas' ? {} : {tab},
+  );
+
+  return [
+    ...seo({title: TITLE[tab], description: DESCRIPTION[tab], url}),
+    breadcrumbLd([
+      {name: 'Início', path: '/'},
+      {name: 'Transferências', path: '/transferencias'},
+      ...(tab === 'ultimas'
+        ? []
+        : [
+            {
+              name: TABS.find((t) => t.id === tab)?.label ?? tab,
+              path: `/transferencias?tab=${tab}`,
+            },
+          ]),
+    ]),
+  ];
+};
 
 export async function loader({request}: Route.LoaderArgs) {
   const url = new URL(request.url);

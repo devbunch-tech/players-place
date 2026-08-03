@@ -10,10 +10,16 @@ import {getCustomerId} from '~/lib/pro';
 import {createDb} from '~/lib/db';
 import {buscarPerfil, salvarApelido} from '~/lib/fantasy.server';
 import {MAX_LEN, MIN_LEN, validarApelido} from '~/lib/apelido';
+import {canonical, seo} from '~/lib/seo';
 
-export const meta: Route.MetaFunction = () => [
-  {title: 'Seu apelido · Game Fantasy · Players Place'},
-];
+// área logada: nada aqui deve entrar no índice
+export const meta: Route.MetaFunction = () =>
+  seo({
+    title: 'Seu apelido · Game Fantasy',
+    description: 'Escolha o apelido que aparece no ranking público do game.',
+    url: canonical('/fantasy/apelido'),
+    noindex: true,
+  });
 
 export async function loader({context}: Route.LoaderArgs) {
   const cliente = await getCustomerId(context);
