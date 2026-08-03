@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "additionalDirectories": [
+      "/Users/digitar/Documents/projects/bunch/fibo/fibo-hydrogen/app/routes",
+      "/Users/digitar/Documents/projects/bunch/fibo/fluxo-api/src/data",
+      "/Users/digitar/Documents/projects/bunch/fibo/fluxo-api/src/graphql/resolvers",
+      "/Users/digitar/Documents/projects/bunch/fibo/fluxo-api/src/services"
+    ]
+  }
+}
