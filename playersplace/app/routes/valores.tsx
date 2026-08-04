@@ -35,7 +35,9 @@ export const meta: Route.MetaFunction = ({data}) => {
 
 export async function loader({request}: Route.LoaderArgs) {
   const url = new URL(request.url);
-  const liga = url.searchParams.get('liga')?.toUpperCase() ?? null;
+  // sem `toUpperCase()`: `findLeague` já casa sem diferenciar caixa, e é o
+  // `league.code` canônico que vai para a origem (o Transfermarkt diferencia)
+  const liga = url.searchParams.get('liga') ?? null;
   const league = liga ? (findLeague(liga) ?? null) : null;
   const players = await (league
     ? getLeagueTopPlayers(league.code)

@@ -13,12 +13,13 @@ import {getLeagueOverview} from '~/lib/tm';
 import {urlset} from '~/lib/sitemap';
 
 export async function loader({params}: Route.LoaderArgs) {
-  const code = params.code.toUpperCase();
-  if (!findLeague(code)) {
+  const league = findLeague(params.code);
+  if (!league) {
     throw new Response('Competição desconhecida.', {status: 404});
   }
 
-  const overview = await getLeagueOverview(code).catch(() => null);
+  // código canônico: o Transfermarkt diferencia caixa (TDeC ≠ TDEC)
+  const overview = await getLeagueOverview(league.code).catch(() => null);
 
   return urlset(
     (overview?.clubs ?? []).map((club) => ({

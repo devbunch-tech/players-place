@@ -24,7 +24,10 @@ import {RoundFixtures, RoundNav} from '~/components/RoundFixtures';
 import {breadcrumbLd, canonical, ldJson, semPontoFinal, seo} from '~/lib/seo';
 
 export const meta: Route.MetaFunction = ({data, params}) => {
-  const code = (data?.code ?? params.code ?? '').toUpperCase();
+  // código canônico (ver o loader): a canônica precisa apontar para uma URL
+  // que funcione, e /competicoes/TDEC não funciona
+  const code =
+    data?.code ?? findLeague(params.code ?? '')?.code ?? (params.code ?? '');
   // ?rodada= troca só o bloco de jogos: a página continua sendo a mesma
   // competição, então a canônica aponta sempre para a versão sem parâmetro
   const url = canonical(`/competicoes/${code}`);
@@ -68,10 +71,12 @@ export const meta: Route.MetaFunction = ({data, params}) => {
 };
 
 export async function loader({params, request}: Route.LoaderArgs) {
-  const code = params.code.toUpperCase();
   const rodada =
     Number(new URL(request.url).searchParams.get('rodada')) || null;
-  const league = findLeague(code) ?? null;
+  const league = findLeague(params.code) ?? null;
+  // o código canônico da lista, e não o da URL: o Transfermarkt diferencia
+  // caixa (TDeC ≠ TDEC), então normalizar para maiúsculas quebrava o Peru
+  const code = league?.code ?? params.code.toUpperCase();
   const [overview, standings, topPlayers, stats, round] = await Promise.all([
     getLeagueOverview(code).catch(() => null),
     getLeagueStandings(code).catch(() => []),
