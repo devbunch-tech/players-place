@@ -2,17 +2,18 @@ import {Link} from 'react-router';
 import type {Route} from './+types/competicoes.$code';
 import {findLeague, leagueLogo} from '~/lib/tm/leagues';
 import {
-  getLeagueOverview,
+  getLeagueOverviewRegistro,
   getLeagueStandings,
   getLeagueStats,
   getLeagueTopPlayers,
   getRoundFixtures,
 } from '~/lib/tm';
-import {euroToMillions, sumValues} from '~/lib/format';
+import {euroToMillions, rotuloAtualizacao, sumValues} from '~/lib/format';
 import {
   Avatar,
   BackLink,
   Crest,
+  DadosSalvos,
   LeagueLogo,
   SectionTitle,
   StatTile,
@@ -77,14 +78,16 @@ export async function loader({params, request}: Route.LoaderArgs) {
   // o código canônico da lista, e não o da URL: o Transfermarkt diferencia
   // caixa (TDeC ≠ TDEC), então normalizar para maiúsculas quebrava o Peru
   const code = league?.code ?? params.code.toUpperCase();
-  const [overview, standings, topPlayers, stats, round] = await Promise.all([
-    getLeagueOverview(code).catch(() => null),
+  const [registro, standings, topPlayers, stats, round] = await Promise.all([
+    getLeagueOverviewRegistro(code).catch(() => null),
     getLeagueStandings(code).catch(() => []),
     getLeagueTopPlayers(code).catch(() => []),
     // estatísticas são complemento: se falharem, a página da liga continua
     getLeagueStats(code).catch(() => ({scorers: [], assists: []})),
     getRoundFixtures(code, rodada).catch(() => null),
   ]);
+  const overview = registro?.valor;
+  // 502 só quando não há cópia salva em nenhuma camada E a origem falhou
   if (!overview || overview.clubs.length === 0) {
     throw new Response('Não foi possível carregar esta competição agora.', {
       status: 502,
@@ -102,6 +105,7 @@ export async function loader({params, request}: Route.LoaderArgs) {
     code,
     league,
     overview,
+    atualizadoEm: registro.fresco ? null : rotuloAtualizacao(registro.salvoEm),
     clubsSorted,
     standings,
     topPlayers: topPlayers.slice(0, 10),
@@ -117,6 +121,7 @@ export default function Competicao({loaderData}: Route.ComponentProps) {
     code,
     league,
     overview,
+    atualizadoEm,
     clubsSorted,
     standings,
     topPlayers,
@@ -148,6 +153,8 @@ export default function Competicao({loaderData}: Route.ComponentProps) {
           </p>
         </div>
       </div>
+
+      <DadosSalvos em={atualizadoEm} />
 
       <div className="mt-5 grid grid-cols-3 gap-3">
         <StatTile label="Valor total" value={totalValue} />

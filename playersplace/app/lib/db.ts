@@ -54,3 +54,19 @@ export function createDb(env: Env): Db | null {
 export function dbConfigured(env: Env): boolean {
   return Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY);
 }
+
+/**
+ * Cliente reaproveitado entre as requisições do mesmo isolate.
+ *
+ * O cache durável do Transfermarkt (`lib/tm/client.ts`) pede o cliente a cada
+ * request; criar um por request desperdiçaria a conexão HTTP mantida pelo
+ * supabase-js. As variáveis são as mesmas durante toda a vida do isolate, então
+ * memorizar é seguro — `null` memorizado também vale, e significa "não
+ * configurado neste ambiente".
+ */
+let instancia: Db | null | undefined;
+
+export function getDb(env: Env): Db | null {
+  if (instancia === undefined) instancia = createDb(env);
+  return instancia;
+}

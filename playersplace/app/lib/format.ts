@@ -49,3 +49,26 @@ export function todayLabel(): string {
   const d = new Date();
   return `${d.getDate()} de ${MONTHS[d.getMonth()]} de ${d.getFullYear()}`;
 }
+
+/**
+ * "04/08 às 14h02" no fuso de Brasília, para o aviso de dado salvo.
+ *
+ * Formatado no servidor de propósito: se a data fosse montada no componente,
+ * o fuso do navegador daria um texto diferente do renderizado no servidor e o
+ * React acusaria erro de hidratação.
+ */
+export function rotuloAtualizacao(ms: number | null | undefined): string | null {
+  if (!ms) return null;
+  const partes = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(ms));
+  const p = (tipo: string) => partes.find((x) => x.type === tipo)?.value ?? '';
+  const dia = p('day');
+  if (!dia) return null;
+  return `${dia}/${p('month')} às ${p('hour')}h${p('minute')}`;
+}

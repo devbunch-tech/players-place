@@ -1,8 +1,8 @@
 import {Link} from 'react-router';
 import type {Route} from './+types/clubes.$id';
 import {findLeague} from '~/lib/tm/leagues';
-import {getClub, getClubForm, getClubTransfers} from '~/lib/tm';
-import {euroToMillions} from '~/lib/format';
+import {getClubRegistro, getClubForm, getClubTransfers} from '~/lib/tm';
+import {euroToMillions, rotuloAtualizacao} from '~/lib/format';
 import {Avatar, BackLink, Crest, SectionTitle, StatTile} from '~/components/ui';
 import {AdSlot} from '~/components/AdSlot';
 import {ClubSignings} from '~/components/ClubSignings';
@@ -73,8 +73,8 @@ export const meta: Route.MetaFunction = ({data, params}) => {
 
 export async function loader({params, request}: Route.LoaderArgs) {
   const season = new URL(request.url).searchParams.get('temporada');
-  const [club, transfers, form] = await Promise.all([
-    getClub(params.id).catch(() => null),
+  const [registro, transfers, form] = await Promise.all([
+    getClubRegistro(params.id).catch(() => null),
     getClubTransfers(
       params.id,
       /^\d+$/.test(season ?? '') ? season : null,
@@ -82,6 +82,8 @@ export async function loader({params, request}: Route.LoaderArgs) {
     // os jogos são complemento: se a origem falhar, a página do clube continua
     getClubForm(params.id).catch(() => ({last: [], next: []})),
   ]);
+  const club = registro?.valor;
+  // 502 só quando não há cópia salva em nenhuma camada E a origem falhou
   if (!club || !club.name) {
     throw new Response('Não foi possível carregar este clube agora.', {
       status: 502,
@@ -120,6 +122,7 @@ export async function loader({params, request}: Route.LoaderArgs) {
   return {
     id: params.id,
     club,
+    atualizadoEm: registro.fresco ? null : rotuloAtualizacao(registro.salvoEm),
     league,
     avgAge,
     foreigners,
@@ -130,8 +133,17 @@ export async function loader({params, request}: Route.LoaderArgs) {
 }
 
 export default function Clube({loaderData}: Route.ComponentProps) {
-  const {id, club, league, avgAge, foreigners, highlights, transfers, form} =
-    loaderData;
+  const {
+    id,
+    club,
+    atualizadoEm,
+    league,
+    avgAge,
+    foreigners,
+    highlights,
+    transfers,
+    form,
+  } = loaderData;
 
   return (
     <div className="pp-in">
@@ -169,8 +181,11 @@ export default function Clube({loaderData}: Route.ComponentProps) {
         <div className="mt-1 font-display text-[32px] leading-none font-extrabold tracking-tight tabular-nums">
           {club.totalValue || '—'}
         </div>
+        {/* o rótulo diz a verdade sobre a idade do dado: quando a origem não
+            respondeu, esta página está servindo a cópia guardada */}
         <div className="mt-2 text-xs text-white/60">
-          fonte: Transfermarkt · atualizado hoje
+          fonte: Transfermarkt ·{' '}
+          {atualizadoEm ? `dados de ${atualizadoEm}` : 'atualizado hoje'}
         </div>
       </div>
 

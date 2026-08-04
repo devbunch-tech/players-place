@@ -228,6 +228,32 @@ export function BackLink({to, label}: {to: string; label: string}) {
   );
 }
 
+/**
+ * Aviso discreto de que a página está servindo a cópia guardada.
+ *
+ * Só aparece quando o dado está vencido — ou seja, quando o Transfermarkt não
+ * respondeu a tempo e a atualização está acontecendo em segundo plano. Com o
+ * dado fresco não há nada a dizer, e o componente some.
+ */
+export function DadosSalvos({em}: {em: string | null}) {
+  if (!em) return null;
+  return (
+    <p className="mt-2 flex items-center gap-1.5 text-[11px] text-faint">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
+        <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" />
+        <path
+          d="M12 7v5l3 2"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+      Dados de {em} · atualizando em segundo plano
+    </p>
+  );
+}
+
 /** Chip de filtro em forma de link (estado ativo: bg ink) */
 export function ChipLink({
   to,

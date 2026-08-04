@@ -3,7 +3,7 @@ import type {Route} from './+types/jogadores.$id';
 import {
   ehSuspensao,
   getClubAbsences,
-  getPlayer,
+  getPlayerRegistro,
   getPlayerCareer,
   getPlayerInjuries,
   getPlayerGameLog,
@@ -13,7 +13,8 @@ import {
   getPlayerStartsBySeason,
   getPlayerTransfers,
 } from '~/lib/tm';
-import {Avatar, BackLink, SectionTitle} from '~/components/ui';
+import {Avatar, BackLink, DadosSalvos, SectionTitle} from '~/components/ui';
+import {rotuloAtualizacao} from '~/lib/format';
 import {AdSlot} from '~/components/AdSlot';
 import {ProCard} from '~/components/ProCard';
 import {Sparkline} from '~/components/Sparkline';
@@ -105,7 +106,7 @@ export const meta: Route.MetaFunction = ({data, params}) => {
 
 export async function loader({params, context}: Route.LoaderArgs) {
   const [
-    player,
+    ficha,
     transfers,
     mv,
     performance,
@@ -115,9 +116,9 @@ export async function loader({params, context}: Route.LoaderArgs) {
     starts,
     injuries,
   ] = await Promise.all([
-    getPlayer(params.id).catch(() => null),
+    getPlayerRegistro(params.id).catch(() => null),
     getPlayerTransfers(params.id).catch(() => []),
-    getPlayerMarketValueGraph(params.id),
+    getPlayerMarketValueGraph(params.id).catch(() => null),
     getPlayerPerformance(params.id).catch(() => []),
     getPlayerCareer(params.id).catch(() => null),
     getPlayerNationalCareer(params.id).catch(() => []),
@@ -125,6 +126,10 @@ export async function loader({params, context}: Route.LoaderArgs) {
     getPlayerStartsBySeason(params.id).catch(() => []),
     getPlayerInjuries(params.id).catch(() => []),
   ]);
+  const player = ficha?.valor;
+  // 502 só quando não há cópia em nenhuma das três camadas de cache E a
+  // origem também falhou — com o jogador já salvo alguma vez, a página abre
+  // mesmo com o Transfermarkt fora do ar
   if (!player || !player.name) {
     throw new Response('Não foi possível carregar este jogador agora.', {
       status: 502,
@@ -174,6 +179,7 @@ export async function loader({params, context}: Route.LoaderArgs) {
   return {
     id: params.id,
     player,
+    atualizadoEm: ficha.fresco ? null : rotuloAtualizacao(ficha.salvoEm),
     transfers: transfers.slice(0, 14),
     mv,
     points,
@@ -206,6 +212,7 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
   const {
     id,
     player,
+    atualizadoEm,
     transfers,
     mv,
     points,
@@ -276,6 +283,8 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
           Comparar
         </Link>
       </div>
+
+      <DadosSalvos em={atualizadoEm} />
 
       {/* logo abaixo do nome: estar fora por lesão é a primeira coisa que quem
           abre a página do jogador precisa saber */}

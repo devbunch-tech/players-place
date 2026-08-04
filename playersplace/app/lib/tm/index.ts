@@ -2,7 +2,14 @@
  * Serviço de dados do Players Place — consultas ao Transfermarkt
  * com cache em memória por rota.
  */
-import {cached, tmApiJson, tmHtml, tmJson} from './client';
+import {
+  cached,
+  cachedRegistro,
+  tmApiJson,
+  tmHtml,
+  tmJson,
+  type Registro,
+} from './client';
 import {ehSuspensao, positionMeta} from './positions';
 import {
   parseClub,
@@ -50,6 +57,8 @@ export * from './leagues';
 export * from './parse';
 export * from './positions';
 
+export type {Registro};
+
 const HOUR = 3600;
 
 /** escudo de clube/seleção no CDN do Transfermarkt */
@@ -86,10 +95,17 @@ export interface MarketValueGraph {
   last_change: string;
 }
 
-export function getLeagueOverview(code: string): Promise<LeagueOverview> {
-  return cached(`league:${code}`, 6 * HOUR, async () =>
+/** a competição com a procedência — ver `getPlayerRegistro` */
+export function getLeagueOverviewRegistro(
+  code: string,
+): Promise<Registro<LeagueOverview>> {
+  return cachedRegistro(`league:${code}`, 6 * HOUR, async () =>
     parseLeagueOverview(await tmHtml(`/-/startseite/wettbewerb/${code}`)),
   );
+}
+
+export async function getLeagueOverview(code: string): Promise<LeagueOverview> {
+  return (await getLeagueOverviewRegistro(code)).valor;
 }
 
 export function getLeagueStandings(code: string): Promise<StandingsGroup[]> {
@@ -112,10 +128,15 @@ export function getGlobalTopPlayers(): Promise<RankedPlayer[]> {
   );
 }
 
-export function getClub(id: string): Promise<ClubProfile> {
-  return cached(`club:${id}`, 6 * HOUR, async () =>
+/** o elenco do clube com a procedência — ver `getPlayerRegistro` */
+export function getClubRegistro(id: string): Promise<Registro<ClubProfile>> {
+  return cachedRegistro(`club:${id}`, 6 * HOUR, async () =>
     parseClub(await tmHtml(`/-/startseite/verein/${id}`)),
   );
+}
+
+export async function getClub(id: string): Promise<ClubProfile> {
+  return (await getClubRegistro(id)).valor;
 }
 
 export interface RodadaInfo {
@@ -496,10 +517,23 @@ export function getClubTransfers(
   );
 }
 
-export function getPlayer(id: string): Promise<PlayerProfile> {
-  return cached(`player:${id}`, 6 * HOUR, async () =>
+/**
+ * A ficha do jogador junto com a procedência do dado.
+ *
+ * A página do jogador usa esta variante porque é ela que decide se a página
+ * existe: quando a origem falha, o que salva a visita é a cópia guardada — e o
+ * visitante merece saber de quando ela é.
+ */
+export function getPlayerRegistro(
+  id: string,
+): Promise<Registro<PlayerProfile>> {
+  return cachedRegistro(`player:${id}`, 6 * HOUR, async () =>
     parsePlayer(await tmHtml(`/-/profil/spieler/${id}`)),
   );
+}
+
+export async function getPlayer(id: string): Promise<PlayerProfile> {
+  return (await getPlayerRegistro(id)).valor;
 }
 
 /**
