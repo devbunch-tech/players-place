@@ -44,8 +44,10 @@ export default function Competicoes() {
       <h1 className="font-display text-[26px] font-extrabold tracking-tight">
         Competições
       </h1>
+      {/* contagem vinda da lista: escrita à mão, ficava errada a cada liga nova */}
       <p className="mt-1 text-sm text-muted">
-        15 ligas conectadas — clubes, elencos e valores em tempo real.
+        {LEAGUES.length} ligas conectadas — clubes, elencos e valores em tempo
+        real.
       </p>
 
       <div className="-mx-4 mt-5 flex gap-2 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">

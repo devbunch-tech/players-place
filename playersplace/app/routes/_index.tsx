@@ -59,9 +59,10 @@ export default function Home({loaderData}: Route.ComponentProps) {
           O mercado da bola que você{' '}
           <span className="rounded-md bg-lime px-1.5">entende</span>.
         </h1>
+        {/* contagem vinda da lista: escrita à mão, ficava errada a cada liga nova */}
         <p className="mt-3 max-w-xl text-[15px] leading-relaxed text-muted">
-          Valores de mercado, elencos e transferências de 15 ligas — direto da
-          fonte, em português.
+          Valores de mercado, elencos e transferências de {LEAGUES.length} ligas
+          — direto da fonte, em português.
         </p>
         <SmartSearch className="mt-5 max-w-xl" />
       </section>

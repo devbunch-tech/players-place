@@ -22,6 +22,7 @@ export interface League {
 
 export const LEAGUES: League[] = [
   {code: 'BRA1', name: 'Brasileirão Série A', country: 'Brasil', flag: '🇧🇷', region: 'América do Sul', short: 'BR', color: '#0B7A3B'},
+  {code: 'BRA2', name: 'Brasileirão Série B', country: 'Brasil', flag: '🇧🇷', region: 'América do Sul', short: 'B2', color: '#1B5E20'},
   {code: 'GB1', name: 'Premier League', country: 'Inglaterra', flag: '🏴󠁧󠁢󠁥󠁮󠁧󠁿', region: 'Europa', short: 'PL', color: '#3D195B'},
   {code: 'ES1', name: 'LaLiga', country: 'Espanha', flag: '🇪🇸', region: 'Europa', short: 'LL', color: '#A50044'},
   {code: 'IT1', name: 'Serie A', country: 'Itália', flag: '🇮🇹', region: 'Europa', short: 'SA', color: '#1565C0'},
