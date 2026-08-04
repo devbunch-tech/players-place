@@ -146,7 +146,12 @@ export async function loader({params, context}: Route.LoaderArgs) {
           .catch(() => null)
       : Promise.resolve(null),
     // depende do nome, então só pode rodar depois do `player`
-    getPlayerHighlight(params.id, player.name, context.env.YOUTUBE_API_KEY),
+    getPlayerHighlight(
+      params.id,
+      player.name,
+      context.env.YOUTUBE_API_KEY,
+      player.club?.name,
+    ),
   ]);
 
   // variação percentual entre os dois últimos pontos do histórico

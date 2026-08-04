@@ -19,6 +19,36 @@ export interface HighlightVideo {
 /** TTL longo: highlights de um atleta não mudam de hora em hora, e a cota manda. */
 const TTL = 7 * 24 * 3600;
 
+/**
+ * Vídeos fixados à mão, quando a busca automática erra.
+ *
+ * Existe porque a busca do YouTube não distingue homônimos: pesquisando
+ * "Rodrigo highlights" ela devolve vídeos do **Rodrygo**, e acrescentar o
+ * clube não resolve quando os dois jogam no mesmo time. Medido em 03/08/2026.
+ *
+ * Chave = id do jogador no Transfermarkt; valor = id do vídeo no YouTube.
+ */
+const FIXADOS: Record<string, string> = {};
+
+/**
+ * A API devolve o título com entidades HTML escapadas ("D&#39;Or", "Goals
+ * &amp; Skills"). O React renderiza texto literalmente, então sem desescapar
+ * o visitante lê o "&#39;" na tela.
+ */
+function desescapar(texto: string): string {
+  const mapa: Record<string, string> = {
+    '&amp;': '&',
+    '&lt;': '<',
+    '&gt;': '>',
+    '&quot;': '"',
+    '&#39;': "'",
+    '&apos;': "'",
+  };
+  return texto
+    .replace(/&(amp|lt|gt|quot|#39|apos);/g, (m) => mapa[m] ?? m)
+    .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
+}
+
 /** URL de busca no YouTube — é para onde caímos sem chave configurada. */
 export function highlightsSearchUrl(playerName: string): string {
   return `https://www.youtube.com/results?search_query=${encodeURIComponent(
@@ -52,14 +82,24 @@ export async function getPlayerHighlight(
   playerId: string,
   playerName: string,
   apiKey: string | undefined,
+  clubName?: string | null,
 ): Promise<HighlightVideo | null> {
+  const fixado = FIXADOS[playerId];
+  if (fixado) {
+    return {youtubeId: fixado, title: `Highlights de ${playerName}`, channel: '', publishedAt: ''};
+  }
   if (!apiKey || !playerName.trim()) return null;
 
-  return cached(`yt:highlight:${playerId}`, TTL, async () => {
+  // O clube entra na busca porque reduz o risco pior — mostrar OUTRO jogador.
+  // Medido: sem ele, "Jefté highlights" trazia vídeo do Rangers, o ex-clube;
+  // com ele, veio o Palmeiras atual. Não resolve homônimo do mesmo time.
+  const termo = [playerName, clubName, 'highlights'].filter(Boolean).join(' ');
+
+  return cached(`yt:highlight:${playerId}:${clubName ?? ''}`, TTL, async () => {
     const url = new URL('https://www.googleapis.com/youtube/v3/search');
     url.searchParams.set('key', apiKey);
     url.searchParams.set('part', 'snippet');
-    url.searchParams.set('q', `${playerName} highlights`);
+    url.searchParams.set('q', termo);
     url.searchParams.set('type', 'video');
     // sem isto o resultado pode ser um vídeo que se recusa a tocar fora do
     // YouTube, e o embed apareceria preto na página
@@ -81,8 +121,8 @@ export async function getPlayerHighlight(
 
       return {
         youtubeId,
-        title: item?.snippet?.title ?? 'Highlights',
-        channel: item?.snippet?.channelTitle ?? '',
+        title: desescapar(item?.snippet?.title ?? 'Highlights'),
+        channel: desescapar(item?.snippet?.channelTitle ?? ''),
         publishedAt: item?.snippet?.publishedAt ?? '',
       };
     } catch {
