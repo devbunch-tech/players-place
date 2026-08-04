@@ -1,24 +1,22 @@
 /**
  * Indicador global de carregamento.
  *
- * Aparece em qualquer navegação entre rotas e some sozinho após
- * `DURACAO_MAXIMA`, mesmo que a página ainda não tenha chegado — foi assim que
- * o comportamento foi pedido.
+ * Cobre a página inteira com um véu translúcido e fica no centro **até a
+ * navegação terminar** — não há tempo máximo. O véu também serve de barreira:
+ * captura o clique e impede que o visitante acione algo na página que já está
+ * saindo de cena.
  *
- * Isso só é razoável por causa do stale-while-revalidate em `lib/tm/client.ts`:
- * com ele as páginas respondem em ~0,2 s e passar de 3 s virou exceção. Sem
- * aquilo, uma competição com cache frio levava até 16 s, e o indicador sumindo
- * aos 3 deixaria o visitante diante de uma tela aparentemente travada.
+ * O que segura isso em pé é o stale-while-revalidate de `lib/tm/client.ts`:
+ * com ele quase toda navegação responde em ~0,2 s. Sem aquilo, uma competição
+ * com cache frio levava até 16 s, e travar a tela por todo esse tempo seria
+ * pior do que não ter indicador nenhum.
  */
 import {useEffect, useState} from 'react';
 import {useNavigation} from 'react-router';
 
-/** o indicador se esconde depois disto, com ou sem a página pronta */
-const DURACAO_MAXIMA = 3000;
-
 /**
- * Navegação instantânea não deve piscar a bola na tela. Só mostra se a
- * requisição passar deste tempo.
+ * Navegação instantânea não deve piscar a tela. Só aparece se a requisição
+ * passar deste tempo — abaixo disso o visitante nem percebe que houve espera.
  */
 const ATRASO_ATE_APARECER = 200;
 
@@ -32,45 +30,53 @@ export function BolaRolando() {
       setVisivel(false);
       return;
     }
-
     const aparecer = setTimeout(() => setVisivel(true), ATRASO_ATE_APARECER);
-    const esconder = setTimeout(() => setVisivel(false), DURACAO_MAXIMA);
-    return () => {
-      clearTimeout(aparecer);
-      clearTimeout(esconder);
-    };
-    // `navigation.location` no lugar de só `carregando`: assim o cronômetro
-    // reinicia a cada nova navegação, e não fica preso na primeira.
+    return () => clearTimeout(aparecer);
+    // `navigation.location.key` além de `carregando`: reinicia a contagem a
+    // cada nova navegação em vez de ficar presa na primeira
   }, [carregando, navigation.location?.key]);
 
   if (!visivel) return null;
 
   return (
     <div
-      className="pointer-events-none fixed inset-x-0 bottom-5 z-50 flex justify-center px-4"
-      // anuncia para leitor de tela sem roubar o foco de quem está navegando
+      // sem `pointer-events-none`: é justamente o véu que bloqueia o clique
+      className="pp-in fixed inset-0 z-50 flex items-center justify-center bg-paper/75 backdrop-blur-[2px]"
+      // `status` + `polite` anuncia para leitor de tela sem roubar o foco;
+      // `aria-busy` diz que o conteúdo por baixo está em transição
       role="status"
       aria-live="polite"
+      aria-busy="true"
     >
-      <div className="pp-in flex items-center gap-2.5 rounded-full bg-ink px-4 py-2.5 text-white shadow-lg">
+      <div className="flex flex-col items-center gap-3">
         <Bola />
-        <span className="text-[13px] font-bold">Bola rolando…</span>
+        <span className="text-sm font-bold text-ink">Bola rolando…</span>
       </div>
     </div>
   );
 }
 
-/** bola de futebol simplificada: legível a 16px, ao contrário de uma real */
+/**
+ * Bola de futebol simplificada. O `circle` tem contorno próprio porque agora
+ * ela fica sobre o véu claro, e uma bola branca sem borda sumiria no fundo.
+ */
 function Bola() {
   return (
     <svg
       className="pp-rolar"
-      width="16"
-      height="16"
+      width="52"
+      height="52"
       viewBox="0 0 24 24"
       aria-hidden
     >
-      <circle cx="12" cy="12" r="11" fill="#fff" />
+      <circle
+        cx="12"
+        cy="12"
+        r="10.6"
+        fill="#fff"
+        stroke="var(--color-ink, #131711)"
+        strokeWidth="1.2"
+      />
       <path
         d="M12 6.4l3.6 2.6-1.4 4.2H9.8L8.4 9z"
         fill="var(--color-ink, #131711)"
