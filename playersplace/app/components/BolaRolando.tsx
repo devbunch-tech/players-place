@@ -13,6 +13,7 @@
  */
 import {useEffect, useState} from 'react';
 import {useNavigation} from 'react-router';
+import {CURIOSIDADES, embaralhar, type Curiosidade} from '~/lib/curiosidades';
 
 /**
  * Navegação instantânea não deve piscar a tela. Só aparece se a requisição
@@ -20,18 +21,49 @@ import {useNavigation} from 'react-router';
  */
 const ATRASO_ATE_APARECER = 200;
 
+/**
+ * A curiosidade só entra quando a espera passa a incomodar. Antes disso ela
+ * seria ruído: o visitante nem terminaria de ler antes da página trocar.
+ */
+const ATRASO_ATE_CURIOSIDADE = 2500;
+
+/** tempo de leitura de cada frase antes de passar para a próxima */
+const TROCA_CURIOSIDADE = 5000;
+
 export function BolaRolando() {
   const navigation = useNavigation();
   const carregando = navigation.state !== 'idle';
   const [visivel, setVisivel] = useState(false);
+  const [curiosidade, setCuriosidade] = useState<Curiosidade | null>(null);
 
   useEffect(() => {
     if (!carregando) {
       setVisivel(false);
+      setCuriosidade(null);
       return;
     }
+
     const aparecer = setTimeout(() => setVisivel(true), ATRASO_ATE_APARECER);
-    return () => clearTimeout(aparecer);
+
+    // Embaralha a cada navegação, e aqui dentro do efeito: `Math.random()` no
+    // corpo do componente rodaria também no servidor e quebraria a hidratação.
+    const fila = embaralhar(CURIOSIDADES);
+    let i = 0;
+    let rodizio: ReturnType<typeof setInterval> | undefined;
+
+    const primeira = setTimeout(() => {
+      setCuriosidade(fila[0] ?? null);
+      rodizio = setInterval(() => {
+        i = (i + 1) % fila.length;
+        setCuriosidade(fila[i] ?? null);
+      }, TROCA_CURIOSIDADE);
+    }, ATRASO_ATE_CURIOSIDADE);
+
+    return () => {
+      clearTimeout(aparecer);
+      clearTimeout(primeira);
+      if (rodizio) clearInterval(rodizio);
+    };
     // `navigation.location.key` além de `carregando`: reinicia a contagem a
     // cada nova navegação em vez de ficar presa na primeira
   }, [carregando, navigation.location?.key]);
@@ -48,9 +80,20 @@ export function BolaRolando() {
       aria-live="polite"
       aria-busy="true"
     >
-      <div className="flex flex-col items-center gap-3">
+      <div className="flex max-w-md flex-col items-center gap-3 px-6 text-center">
         <Bola />
         <span className="text-sm font-bold text-ink">Bola rolando…</span>
+
+        {curiosidade ? (
+          // `key` no texto: remonta o elemento a cada troca, e a animação de
+          // entrada roda de novo em vez de o texto trocar seco
+          <p
+            key={curiosidade.texto}
+            className="pp-in mt-1 text-[13px] leading-relaxed text-muted"
+          >
+            {curiosidade.texto}
+          </p>
+        ) : null}
       </div>
     </div>
   );

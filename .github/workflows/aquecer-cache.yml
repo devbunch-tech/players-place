@@ -1,0 +1,79 @@
+# Aquecimento do cache do Transfermarkt.
+#
+# POR QUÊ: a primeira visita a uma página nunca consultada dispara a raspagem
+# ao vivo. Medido em produção: 5,8s a 16,2s de TTFB, contra ~0,2s com a cópia
+# em cache — e um caso que chegou a estourar o timeout e devolver 502. Quem
+# paga essa conta é sempre um visitante real. Este job passa antes dele.
+#
+# POR QUE UMA VEZ POR DIA BASTA: o `cached()` em app/lib/tm/client.ts serve a
+# cópia velha na hora e revalida em segundo plano, e a entrada fica guardada
+# por 7 dias. Ou seja, não é preciso manter tudo "fresco" — basta garantir que
+# nunca falte uma cópia. Rodar de hora em hora só gastaria minutos do Actions.
+#
+# COMO: simplesmente visita as páginas públicas. Sem endpoint novo, sem token,
+# sem superfície de ataque a mais — e exercita exatamente o mesmo caminho de
+# código que um visitante percorre.
+name: aquecer-cache
+
+on:
+  schedule:
+    - cron: '0 9 * * *' # 09:00 UTC = 06:00 BRT, antes do movimento do dia
+  workflow_dispatch: {} # permite disparar manualmente pela aba Actions
+
+jobs:
+  aquecer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Monta a lista de páginas a partir do código
+        id: urls
+        # A lista de ligas sai de leagues.ts para não haver duas verdades: liga
+        # nova entra no aquecimento sozinha, sem ninguém lembrar de editar aqui.
+        run: |
+          node -e "
+            const fs = require('fs');
+            const src = fs.readFileSync('playersplace/app/lib/tm/leagues.ts', 'utf8');
+            const codes = [...src.matchAll(/\{code: '([^']+)'/g)].map(m => m[1]);
+            if (!codes.length) { console.error('nenhuma liga encontrada'); process.exit(1); }
+            const paths = [
+              '/', '/competicoes', '/valores', '/transferencias', '/fantasy',
+              ...codes.map(c => '/competicoes/' + c),
+              ...codes.map(c => '/valores?liga=' + c),
+            ];
+            fs.writeFileSync('/tmp/urls.txt', paths.join('\n'));
+            console.log('paginas=' + paths.length + ' ligas=' + codes.length);
+          "
+
+      - name: Visita cada página
+        run: |
+          base="${BASE:-https://www.playersplace.com.br}"
+          lentas=0; erros=0; total=0
+          while read -r path; do
+            [ -z "$path" ] && continue
+            total=$((total+1))
+            # timeout generoso: a primeira visita a uma liga fria é justamente
+            # a lenta, e é ela que queremos absorver aqui
+            code_time=$(curl -s -o /dev/null -w "%{http_code} %{time_starttransfer}" --max-time 90 "$base$path" || echo "000 0")
+            code=$(echo "$code_time" | cut -d' ' -f1)
+            t=$(echo "$code_time" | cut -d' ' -f2)
+            lenta=$(awk -v v="$t" 'BEGIN{print (v>3)?1:0}')
+            [ "$lenta" = "1" ] && lentas=$((lentas+1))
+            case "$code" in
+              2*|3*) ;;
+              *) erros=$((erros+1)); echo "::warning::$path respondeu $code" ;;
+            esac
+            printf '%-34s %s  %ss\n' "$path" "$code" "$t"
+            sleep 1   # não martelar a própria origem nem o Transfermarkt
+          done < /tmp/urls.txt
+
+          echo "----"
+          echo "total: $total · estavam frias: $lentas · com erro: $erros"
+          # Falhar só quando muita coisa quebra: uma liga fora do ar não deve
+          # apagar o sinal de que o aquecimento rodou.
+          if [ "$erros" -gt $((total / 4)) ]; then
+            echo "::error::$erros de $total páginas falharam"
+            exit 1
+          fi
+        env:
+          BASE: ${{ vars.SITE_URL }}
