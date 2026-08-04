@@ -86,7 +86,12 @@ export async function getPlayerHighlight(
 ): Promise<HighlightVideo | null> {
   const fixado = FIXADOS[playerId];
   if (fixado) {
-    return {youtubeId: fixado, title: `Highlights de ${playerName}`, channel: '', publishedAt: ''};
+    return {
+      youtubeId: fixado,
+      title: `Highlights de ${playerName}`,
+      channel: '',
+      publishedAt: '',
+    };
   }
   if (!apiKey || !playerName.trim()) return null;
 
@@ -95,39 +100,50 @@ export async function getPlayerHighlight(
   // com ele, veio o Palmeiras atual. Não resolve homônimo do mesmo time.
   const termo = [playerName, clubName, 'highlights'].filter(Boolean).join(' ');
 
-  return cached(`yt:highlight:${playerId}:${clubName ?? ''}`, TTL, async () => {
-    const url = new URL('https://www.googleapis.com/youtube/v3/search');
-    url.searchParams.set('key', apiKey);
-    url.searchParams.set('part', 'snippet');
-    url.searchParams.set('q', termo);
-    url.searchParams.set('type', 'video');
-    // sem isto o resultado pode ser um vídeo que se recusa a tocar fora do
-    // YouTube, e o embed apareceria preto na página
-    url.searchParams.set('videoEmbeddable', 'true');
-    url.searchParams.set('maxResults', '1');
-    url.searchParams.set('order', 'relevance');
-    url.searchParams.set('safeSearch', 'strict');
-    url.searchParams.set('relevanceLanguage', 'pt');
+  const resultado = await cached<HighlightVideo | null | undefined>(
+    `yt:highlight:${playerId}:${clubName ?? ''}`,
+    TTL,
+    async () => {
+      const url = new URL('https://www.googleapis.com/youtube/v3/search');
+      url.searchParams.set('key', apiKey);
+      url.searchParams.set('part', 'snippet');
+      url.searchParams.set('q', termo);
+      url.searchParams.set('type', 'video');
+      // sem isto o resultado pode ser um vídeo que se recusa a tocar fora do
+      // YouTube, e o embed apareceria preto na página
+      url.searchParams.set('videoEmbeddable', 'true');
+      url.searchParams.set('maxResults', '1');
+      url.searchParams.set('order', 'relevance');
+      url.searchParams.set('safeSearch', 'strict');
+      url.searchParams.set('relevanceLanguage', 'pt');
 
-    try {
-      const res = await fetch(url, {signal: AbortSignal.timeout(8000)});
-      // 403 costuma ser cota estourada; qualquer falha vira "sem vídeo"
-      if (!res.ok) return null;
+      try {
+        const res = await fetch(url, {signal: AbortSignal.timeout(8000)});
+        // `undefined` = não guarde. Falha da API (403 de cota, 5xx, chave ainda
+        // não propagada) é transitória: gravar isso congelaria a página no botão
+        // de busca por 7 dias, muito depois de o problema ter passado.
+        if (!res.ok) return undefined;
 
-      const data = (await res.json()) as YouTubeSearchResponse;
-      const item = data.items?.[0];
-      const youtubeId = item?.id?.videoId;
-      if (!youtubeId) return null;
+        const data = (await res.json()) as YouTubeSearchResponse;
+        const item = data.items?.[0];
+        const youtubeId = item?.id?.videoId;
+        // aqui é `null`: a busca funcionou e realmente não achou vídeo para este
+        // jogador — vale guardar, senão gastaríamos cota repetindo em vão
+        if (!youtubeId) return null;
 
-      return {
-        youtubeId,
-        title: desescapar(item?.snippet?.title ?? 'Highlights'),
-        channel: desescapar(item?.snippet?.channelTitle ?? ''),
-        publishedAt: item?.snippet?.publishedAt ?? '',
-      };
-    } catch {
-      // rede fora, timeout ou JSON inesperado — a página segue sem o bloco
-      return null;
-    }
-  });
+        return {
+          youtubeId,
+          title: desescapar(item?.snippet?.title ?? 'Highlights'),
+          channel: desescapar(item?.snippet?.channelTitle ?? ''),
+          publishedAt: item?.snippet?.publishedAt ?? '',
+        };
+      } catch {
+        // rede fora, timeout ou JSON inesperado: também transitório, não guarda
+        return undefined;
+      }
+    },
+  );
+
+  // para quem chama, "não achei" e "não deu para buscar" são a mesma tela
+  return resultado ?? null;
 }

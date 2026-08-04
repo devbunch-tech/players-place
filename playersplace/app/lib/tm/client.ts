@@ -169,8 +169,14 @@ export async function cached<T>(
 
   // primeira visita absoluta a esta chave: não há o que servir, tem que esperar
   const value = await fn();
-  remember(key, ttlSeconds, value);
-  if (cache && value !== undefined) await guardar(cache, key, ttlSeconds, value);
+
+  // `undefined` é o combinado para "não guarde isto": deixa quem chama
+  // distinguir resultado legítimo (inclusive `null`) de falha transitória, que
+  // não pode ficar congelada no cache pelo TTL inteiro.
+  if (value !== undefined) {
+    remember(key, ttlSeconds, value);
+    if (cache) await guardar(cache, key, ttlSeconds, value);
+  }
 
   return value;
 }
