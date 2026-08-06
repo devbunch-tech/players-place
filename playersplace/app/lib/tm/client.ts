@@ -203,6 +203,88 @@ function persistir(
   waitUntilAtual?.(tarefa);
 }
 
+/**
+ * Remove do L3 as entradas que guardaram estrutura vazia.
+ *
+ * POR QUE PRECISA EXISTIR: em 06/08/2026 o Transfermarkt entrou em manutenção
+ * respondendo HTTP 200 com uma página de aviso. Os parsers a digeriram e
+ * devolveram `{name: '', players: []}`, que `cached()` gravou como valor bom —
+ * só `undefined` significa "não guarde isto". Resultado: a lista de clubes da
+ * Série A ficou vazia e toda página de clube passou a devolver 502 em 1,7s,
+ * sem sequer consultar a origem. A manutenção durou minutos; o cache esticaria
+ * o efeito por até 6 horas (a validade lógica) sozinho.
+ *
+ * As guardas em `tmHtml` e em `CLUBE.buscar` impedem novos envenenamentos. Esta
+ * função limpa os que já estão gravados — e continua valendo como rede: rodada
+ * no aquecimento diário, ela devolve à origem qualquer chave que tenha ficado
+ * vazia por um motivo que ainda não conhecemos.
+ *
+ * SÓ MEXE em `club:` e `league:`, porque só nelas o vazio é impossível de ser
+ * legítimo: todo clube tem elenco e toda competição tem clubes. Chaves como
+ * `pinjuries:` ou `clubtr:` são legitimamente vazias o tempo todo (jogador sem
+ * lesão, clube sem contratação na janela) e apagá-las só geraria raspagem à toa.
+ *
+ * O payload é inspecionado em JS, e não por filtro JSON no PostgREST, porque a
+ * regra é por formato e precisa ser óbvia de ler — o volume aqui é de dezenas
+ * de linhas, não de milhares.
+ */
+export interface ResumoExpurgo {
+  inspecionadas: number;
+  removidas: string[];
+}
+
+/** o valor não traz informação nenhuma — ver `expurgarVazias` */
+function vazia(chave: string, valor: unknown): boolean {
+  if (valor === null || valor === undefined) return true;
+  if (typeof valor !== 'object') return false;
+  const v = valor as Record<string, unknown>;
+
+  if (chave.startsWith('club:')) {
+    const players = v.players;
+    return !v.name && (!Array.isArray(players) || players.length === 0);
+  }
+  if (chave.startsWith('league:')) {
+    const clubs = v.clubs;
+    return !Array.isArray(clubs) || clubs.length === 0;
+  }
+  return false;
+}
+
+export async function expurgarVazias(db: Db | null): Promise<ResumoExpurgo> {
+  const vazio: ResumoExpurgo = {inspecionadas: 0, removidas: []};
+  if (!db) return vazio;
+
+  try {
+    const {data, error} = await db
+      .from(TABELA)
+      .select('chave, payload')
+      .or('chave.like.club:%,chave.like.league:%');
+    if (error || !data) return vazio;
+
+    const removidas = (data as {chave: string; payload: {v: unknown}}[])
+      .filter((l) => vazia(l.chave, l.payload?.v))
+      .map((l) => l.chave);
+
+    if (removidas.length) {
+      await db.from(TABELA).delete().in('chave', removidas);
+
+      // As três camadas guardam cópias independentes: apagar só o L3 deixaria a
+      // Cache API servindo o mesmo vazio, e o L3 seria repovoado a partir dela
+      // na primeira leitura. O L2 é por PoP — este laço limpa o PoP que atendeu
+      // esta chamada, e os demais se resolvem quando a entrada vence lá.
+      const cache = await openCache();
+      for (const c of removidas) {
+        memory.delete(c);
+        if (cache) await cache.delete(cacheUrl(c)).catch(() => false);
+      }
+    }
+
+    return {inspecionadas: data.length, removidas};
+  } catch {
+    return vazio;
+  }
+}
+
 /** revalidações em voo, para N requisições simultâneas não virarem N fetches */
 const revalidando = new Set<string>();
 
@@ -434,7 +516,7 @@ export class OrigemIndisponivel extends Error {
   }
 }
 
-function registrarFalhaDeRede(): void {
+function registrarFalha(): void {
   if (++falhasSeguidas >= FALHAS_ATE_ABRIR) {
     abertoAte = Date.now() + JANELA_ABERTO;
   }
@@ -459,7 +541,7 @@ async function comDisjuntor(
     res = await fetch(entrada, init);
   } catch (e) {
     // só falha de rede/timeout abre o disjuntor: um 404 é a origem funcionando
-    registrarFalhaDeRede();
+    registrarFalha();
     throw new OrigemIndisponivel((e as Error).message);
   }
 
@@ -482,9 +564,35 @@ async function tmFetch(path: string, accept: string): Promise<Response> {
   return res;
 }
 
+/**
+ * A página de manutenção do Transfermarkt.
+ *
+ * ELA VEM COM HTTP 200. Medido em 06/08/2026: 20 KB, sem tabela de elenco, sem
+ * cabeçalho de clube. Os parsers a digerem sem reclamar e devolvem estrutura
+ * vazia — `{name: '', players: []}` — que `cached()` grava como valor legítimo,
+ * porque só `undefined` significa "não guarde isto".
+ *
+ * O estrago não é a indisponibilidade: é o cache. A lista de clubes da Série A
+ * ficou vazia e TODA página de clube passou a devolver 502 em 1,7s, sem sequer
+ * consultar a origem — servindo o vazio guardado, com 6h de validade lógica e 7
+ * dias de retenção no L3. Ou seja, a manutenção deles durava minutos e o nosso
+ * cache prolongava o efeito por horas.
+ *
+ * Tratar como falha é o que devolve o comportamento correto: a exceção sobe,
+ * nada é gravado, e as camadas continuam servindo a cópia boa de antes.
+ */
+const MANUTENCAO = /<title>\s*Transfermarkt Maintenance\s*<\/title>/i;
+
 export async function tmHtml(path: string): Promise<string> {
   const res = await tmFetch(path, 'text/html,application/xhtml+xml');
-  return res.text();
+  const html = await res.text();
+  if (MANUTENCAO.test(html)) {
+    // conta para o disjuntor: manutenção é a origem indisponível, e insistir
+    // em cada clube da série só rende vinte cópias da mesma página de aviso
+    registrarFalha();
+    throw new OrigemIndisponivel('em manutenção');
+  }
+  return html;
 }
 
 export async function tmJson<T>(path: string): Promise<T> {

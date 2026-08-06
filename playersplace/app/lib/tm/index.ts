@@ -141,8 +141,19 @@ export function getGlobalTopPlayers(): Promise<RankedPlayer[]> {
 const CLUBE = {
   chave: (id: string) => `club:${id}`,
   ttl: 6 * HOUR,
-  buscar: async (id: string) =>
-    parseClub(await tmHtml(`/-/startseite/verein/${id}`)),
+  buscar: async (id: string) => {
+    const club = parseClub(await tmHtml(`/-/startseite/verein/${id}`));
+    // Um clube sem nome E sem elenco não é um clube: é a origem devolvendo
+    // outra coisa (manutenção, redirect, HTML remodelado). Sem este guarda a
+    // estrutura vazia entra no cache como valor bom e a página passa a devolver
+    // 502 sem nem consultar a origem — foi exatamente o que aconteceu em
+    // 06/08/2026. `MANUTENCAO` em client.ts pega o caso conhecido; este pega
+    // os que ainda não conhecemos.
+    if (!club.name && !club.players.length) {
+      throw new Error(`elenco vazio para o clube ${id} — origem suspeita`);
+    }
+    return club;
+  },
 };
 
 /** o elenco do clube com a procedência — ver `getPlayerRegistro` */

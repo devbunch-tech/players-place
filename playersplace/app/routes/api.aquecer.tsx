@@ -27,6 +27,7 @@
  *   GET  /api/aquecer   → só relata o estado da base (não escreve nada)
  */
 import {findLeague, getLeagueOverview, renovarClube} from '~/lib/tm';
+import {expurgarVazias} from '~/lib/tm/client';
 import {getDb} from '~/lib/db';
 import {
   gravarElencoBase,
@@ -88,6 +89,15 @@ export async function action({request, context}: Route.ActionArgs) {
     Math.max(1, Number(url.searchParams.get('limite')) || LOTE_PADRAO),
   );
 
+  // Expurgo antes de qualquer leitura: a lista de clubes logo abaixo sai do
+  // cache normal, e se ela estiver envenenada (vazia) o job aquece zero clubes
+  // e ainda carimba a execução como concluída — foi exatamente o que aconteceu
+  // em 06/08/2026. Limpar primeiro faz a lista ser rebuscada na origem.
+  //
+  // Só no primeiro lote: a varredura é a mesma nos lotes seguintes e repeti-la
+  // três vezes por série seria trabalho de banco jogado fora.
+  const expurgo = inicio === 0 ? await expurgarVazias(db) : null;
+
   const comeco = Date.now();
 
   // a lista de clubes vem do cache normal de propósito: ela muda uma vez por
@@ -146,6 +156,8 @@ export async function action({request, context}: Route.ActionArgs) {
     ate: fim,
     total: clubes.length,
     proximo,
+    // sai só quando houve o que limpar: num dia normal é ruído no log do job
+    ...(expurgo?.removidas.length ? {expurgadas: expurgo.removidas} : {}),
   });
 }
 

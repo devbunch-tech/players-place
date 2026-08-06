@@ -128,6 +128,9 @@ jobs:
                   clubes += corpo.clubes || 0;
                   jogadores += corpo.jogadores || 0;
                   for (const e of corpo.erros || []) console.log('::warning::' + liga + ': ' + e);
+                  // entrada vazia no cache é sintoma de origem devolvendo página
+                  // de manutenção com 200 — precisa ser visível, não silencioso
+                  for (const c of corpo.expurgadas || []) console.log('::warning::' + liga + ': cache envenenado removido — ' + c);
 
                   inicio = corpo.proximo;
                 }
