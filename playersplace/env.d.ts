@@ -55,6 +55,14 @@ declare global {
     FANTASY_APURACAO_TOKEN?: string;
 
     /**
+     * Segredo que libera POST /api/aquecer, o job que materializa os elencos
+     * do Brasileirão em `jogadores_base`. Mesma razão do token acima: cada
+     * chamada custa até 20 raspagens, então sem a variável a rota fica
+     * desligada em vez de aberta.
+     */
+    AQUECIMENTO_TOKEN?: string;
+
+    /**
      * Chave da YouTube Data API v3, usada para achar o vídeo de highlights da
      * página do jogador. Opcional: sem ela o bloco vira um botão que abre a
      * busca no YouTube, em vez de sumir ou quebrar.

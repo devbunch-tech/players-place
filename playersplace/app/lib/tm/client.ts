@@ -94,6 +94,22 @@ export function registrarWaitUntil(fn: (p: Promise<unknown>) => void): void {
 }
 
 /**
+ * Roda a tarefa sem segurar a resposta, amarrada ao `waitUntil` da requisição
+ * em curso quando ele existe.
+ *
+ * É o que permite a uma página gravar efeito colateral (a página do clube
+ * alimentando a `jogadores_base`, por exemplo) sem cobrar nada do visitante:
+ * a resposta sai igual, e o Worker fica vivo até a gravação terminar. Sem
+ * `waitUntil` — dev local — a promessa roda até onde der, que ali basta.
+ */
+export function emSegundoPlano(tarefa: Promise<unknown>): void {
+  // sem o catch, uma falha aqui vira unhandled rejection e polui o log com um
+  // erro que, por definição, ninguém está esperando
+  const segura = tarefa.catch(() => {});
+  waitUntilAtual?.(segura);
+}
+
+/**
  * Cliente do Supabase que sustenta o L3, preenchido por `lib/context.ts` a
  * cada request pelo mesmo motivo do `waitUntil`: `cached()` não enxerga o
  * `env`. Fica `null` quando o banco não está configurado — aí as três camadas
@@ -347,6 +363,38 @@ export async function cached<T>(
 ): Promise<T> {
   const {valor} = await cachedRegistro(key, ttlSeconds, fn);
   return valor;
+}
+
+/**
+ * Vai na origem, grava nas três camadas e devolve o dado — sem nunca ler o
+ * cache antes.
+ *
+ * Existe para o aquecimento (`/api/aquecer`), e a diferença em relação a
+ * `cached()` é justamente o stale-while-revalidate: com a chave vencida,
+ * `cached()` devolveria a cópia velha na hora e revalidaria em segundo plano,
+ * então o job gravaria na `jogadores_base` o elenco de ontem e a base ficaria
+ * permanentemente um dia atrás. Aqui a espera pela origem é o objetivo — quem
+ * está esperando é um cron, não um visitante.
+ *
+ * Diferente de `cached()`, esta função PROPAGA a falha: um clube que não
+ * respondeu precisa aparecer no relatório do job, não virar silêncio.
+ */
+export async function renovar<T>(
+  key: string,
+  ttlSeconds: number,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const agora = Date.now();
+  const value = await fn();
+
+  if (value !== undefined) {
+    remember(key, ttlSeconds, value, agora);
+    const cache = await openCache();
+    if (cache) await guardar(cache, key, ttlSeconds, value, agora);
+    await gravarNoBanco(key, ttlSeconds, value, agora);
+  }
+
+  return value;
 }
 
 async function tmFetch(path: string, accept: string): Promise<Response> {

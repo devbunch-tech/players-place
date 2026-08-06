@@ -2,8 +2,8 @@
  * Geração dos sitemaps.
  *
  * O site é dividido em vários arquivos em vez de um só porque as listas de
- * clubes dependem do Transfermarkt: um sitemap único obrigaria a consultar as
- * 15 ligas na mesma requisição, o que estoura o limite de subrequests do
+ * clubes dependem do Transfermarkt: um sitemap único obrigaria a consultar
+ * todas as ligas na mesma requisição, o que estoura o limite de subrequests do
  * worker do Oxygen. Com um arquivo por liga, cada requisição faz uma consulta
  * e o índice em /sitemap.xml costura tudo.
  */

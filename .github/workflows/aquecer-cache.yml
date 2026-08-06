@@ -77,3 +77,58 @@ jobs:
           fi
         env:
           BASE: ${{ vars.SITE_URL }}
+
+      # Visitar páginas aquece o cache, mas não ESCREVE na `jogadores_base` —
+      # a tabela que faz a página do jogador abrir sem esperar raspagem
+      # nenhuma. Este passo chama o endpoint que materializa os elencos.
+      #
+      # Em lotes porque o Worker tem teto de subrequests por requisição: o
+      # endpoint devolve `proximo` e o laço continua de onde parou.
+      - name: Materializa os elencos do Brasileirão
+        env:
+          BASE: ${{ vars.SITE_URL }}
+          TOKEN: ${{ secrets.AQUECIMENTO_TOKEN }}
+        run: |
+          node -e "
+            const base = process.env.BASE || 'https://www.playersplace.com.br';
+            const token = process.env.TOKEN;
+            const ligas = ['BRA1', 'BRA2'];
+            let falhou = false;
+
+            // O segredo é opcional: sem ele o repositório continua rodando o
+            // aquecimento de páginas e só pula este passo, em vez de o job
+            // inteiro ficar vermelho por configuração ausente.
+            if (!token) {
+              console.log('::notice::AQUECIMENTO_TOKEN não cadastrado — base de jogadores não foi atualizada');
+              process.exit(0);
+            }
+
+            (async () => {
+              for (const liga of ligas) {
+                let inicio = 0, clubes = 0, jogadores = 0, voltas = 0;
+                while (inicio !== null) {
+                  // trava de segurança: sem ela um \`proximo\` que não avança
+                  // (bug do servidor) rodaria o job para sempre
+                  if (++voltas > 12) { console.log('::warning::' + liga + ': lotes demais, abortando'); falhou = true; break; }
+
+                  const url = base + '/api/aquecer?liga=' + liga + '&inicio=' + inicio + '&limite=10';
+                  const r = await fetch(url, { method: 'POST', headers: { 'x-aquecer-token': token } });
+                  const corpo = await r.json().catch(() => ({}));
+
+                  if (!r.ok) {
+                    console.log('::error::' + liga + ' lote ' + inicio + ' respondeu ' + r.status + ' ' + JSON.stringify(corpo));
+                    falhou = true;
+                    break;
+                  }
+
+                  clubes += corpo.clubes || 0;
+                  jogadores += corpo.jogadores || 0;
+                  for (const e of corpo.erros || []) console.log('::warning::' + liga + ': ' + e);
+
+                  inicio = corpo.proximo;
+                }
+                console.log(liga + ': ' + clubes + ' clubes, ' + jogadores + ' jogadores');
+              }
+              if (falhou) process.exit(1);
+            })();
+          "

@@ -387,3 +387,174 @@ export function EmptyNote({children}: {children: React.ReactNode}) {
     </div>
   );
 }
+
+/* ---------------------------------------------------------------------------
+ * Esqueletos
+ *
+ * Cada painel pesado da página do jogador desce em streaming e mostra um destes
+ * enquanto não chega. Duas regras que valem para todos:
+ *
+ *  1. o esqueleto ocupa a MESMA altura do conteúdo real. Um placeholder mais
+ *     baixo faz a página pular quando o painel chega, o que é pior do que a
+ *     espera que ele veio disfarçar.
+ *  2. `aria-hidden` + `role="status"` no contêiner: o leitor de tela ouve
+ *     "carregando", não a barra cinza repetida quinze vezes.
+ * ------------------------------------------------------------------------ */
+
+/** barra cinza pulsante — a peça de que os outros esqueletos são feitos */
+export function Skeleton({
+  className = '',
+  arredondado = 'rounded-md',
+}: {
+  className?: string;
+  arredondado?: string;
+}) {
+  return (
+    <div
+      className={`pp-pulse bg-soft ${arredondado} ${className}`}
+      aria-hidden
+    />
+  );
+}
+
+/** embrulho comum: título de seção real + corpo em esqueleto */
+export function SkeletonSecao({
+  titulo,
+  children,
+  rotulo,
+}: {
+  titulo: string;
+  children: React.ReactNode;
+  /** o que o leitor de tela ouve; por padrão, o próprio título */
+  rotulo?: string;
+}) {
+  return (
+    <section role="status" aria-live="polite" aria-busy="true">
+      <SectionTitle>{titulo}</SectionTitle>
+      <span className="sr-only">
+        Carregando {rotulo ?? titulo.toLowerCase()}…
+      </span>
+      {children}
+    </section>
+  );
+}
+
+/** tabela em esqueleto — o caso mais comum (desempenho, jogos, carreira) */
+export function SkeletonTabela({
+  titulo,
+  linhas = 6,
+  colunas = 5,
+}: {
+  titulo: string;
+  linhas?: number;
+  colunas?: number;
+}) {
+  return (
+    <SkeletonSecao titulo={titulo}>
+      <div className="overflow-hidden rounded-card border border-line bg-card">
+        <div className="flex gap-3 border-b border-innerline px-4 py-3">
+          {Array.from({length: colunas}, (_, i) => (
+            <Skeleton
+              key={i}
+              className={`h-3 ${i === 0 ? 'flex-[2]' : 'flex-1'}`}
+            />
+          ))}
+        </div>
+        {Array.from({length: linhas}, (_, l) => (
+          <div
+            key={l}
+            className="flex items-center gap-3 border-b border-innerline px-4 py-3.5 last:border-b-0"
+          >
+            {Array.from({length: colunas}, (_, c) => (
+              <Skeleton
+                key={c}
+                className={`h-3.5 ${c === 0 ? 'flex-[2]' : 'flex-1'}`}
+              />
+            ))}
+          </div>
+        ))}
+      </div>
+    </SkeletonSecao>
+  );
+}
+
+/** cartão da coluna lateral (ficha, posições, carreira por clube) */
+export function SkeletonCartao({
+  titulo,
+  linhas = 4,
+}: {
+  titulo: string;
+  linhas?: number;
+}) {
+  return (
+    <section
+      className="rounded-card border border-line bg-card p-4"
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+    >
+      <h2 className="mb-3 font-display text-base font-extrabold tracking-tight">
+        {titulo}
+      </h2>
+      <span className="sr-only">Carregando {titulo.toLowerCase()}…</span>
+      <div className="space-y-3">
+        {Array.from({length: linhas}, (_, i) => (
+          <div key={i} className="space-y-1.5">
+            <Skeleton className="h-2.5 w-16" />
+            <Skeleton className="h-3.5 w-3/4" />
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+/** lista de linhas com avatar — transferências, destaques, elenco */
+export function SkeletonLista({
+  titulo,
+  linhas = 5,
+}: {
+  titulo: string;
+  linhas?: number;
+}) {
+  return (
+    <SkeletonSecao titulo={titulo}>
+      <div className="overflow-hidden rounded-card border border-line bg-card">
+        {Array.from({length: linhas}, (_, i) => (
+          <div
+            key={i}
+            className="flex items-center gap-3 border-b border-innerline px-4 py-3 last:border-b-0"
+          >
+            <Skeleton className="h-8 w-8 shrink-0" arredondado="rounded-full" />
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <Skeleton className="h-3.5 w-2/5" />
+              <Skeleton className="h-2.5 w-1/4" />
+            </div>
+            <Skeleton className="h-3.5 w-16 shrink-0" />
+          </div>
+        ))}
+      </div>
+    </SkeletonSecao>
+  );
+}
+
+/**
+ * Bloco livre, para os painéis que não são nem tabela nem lista (gráfico de
+ * valorização, vídeo, campinho de posições).
+ */
+export function SkeletonBloco({
+  titulo,
+  altura = 'h-40',
+}: {
+  titulo: string;
+  altura?: string;
+}) {
+  return (
+    <SkeletonSecao titulo={titulo}>
+      <Skeleton
+        className={`w-full ${altura} border border-line`}
+        arredondado="rounded-card"
+      />
+    </SkeletonSecao>
+  );
+}

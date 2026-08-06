@@ -1,9 +1,21 @@
-import {Link} from 'react-router';
+import {Suspense} from 'react';
+import {Await, Link} from 'react-router';
 import type {Route} from './+types/clubes.$id';
 import {findLeague} from '~/lib/tm/leagues';
 import {getClubRegistro, getClubForm, getClubTransfers} from '~/lib/tm';
+import {emSegundoPlano} from '~/lib/tm/client';
+import {getDb} from '~/lib/db';
+import {gravarElencoBase} from '~/lib/jogadores.server';
 import {euroToMillions, rotuloAtualizacao} from '~/lib/format';
-import {Avatar, BackLink, Crest, SectionTitle, StatTile} from '~/components/ui';
+import {
+  Avatar,
+  BackLink,
+  Crest,
+  SectionTitle,
+  Skeleton,
+  SkeletonLista,
+  StatTile,
+} from '~/components/ui';
 import {AdSlot} from '~/components/AdSlot';
 import {ClubSignings} from '~/components/ClubSignings';
 import {ClubFormSection} from '~/components/ClubForm';
@@ -71,17 +83,19 @@ export const meta: Route.MetaFunction = ({data, params}) => {
   ];
 };
 
-export async function loader({params, request}: Route.LoaderArgs) {
+export async function loader({params, request, context}: Route.LoaderArgs) {
   const season = new URL(request.url).searchParams.get('temporada');
-  const [registro, transfers, form] = await Promise.all([
-    getClubRegistro(params.id).catch(() => null),
-    getClubTransfers(
-      params.id,
-      /^\d+$/.test(season ?? '') ? season : null,
-    ).catch(() => null),
-    // os jogos são complemento: se a origem falhar, a página do clube continua
-    getClubForm(params.id).catch(() => ({last: [], next: []})),
-  ]);
+
+  // as três partem juntas; só o elenco é esperado, porque é dele que saem o
+  // título, o valor total e a tabela — o resto desce em streaming
+  const transfers = getClubTransfers(
+    params.id,
+    /^\d+$/.test(season ?? '') ? season : null,
+  ).catch(() => null);
+  // os jogos são complemento: se a origem falhar, a página do clube continua
+  const form = getClubForm(params.id).catch(() => ({last: [], next: []}));
+
+  const registro = await getClubRegistro(params.id).catch(() => null);
   const club = registro?.valor;
   // 502 só quando não há cópia salva em nenhuma camada E a origem falhou
   if (!club || !club.name) {
@@ -90,6 +104,17 @@ export async function loader({params, request}: Route.LoaderArgs) {
     });
   }
   const league = club.league ? (findLeague(club.league.code) ?? null) : null;
+
+  // Alimenta a base de jogadores com o elenco que acabamos de ler. Sai de
+  // graça — o dado já está aqui — e é o que mantém a `jogadores_base` viva
+  // para clubes fora do aquecimento diário, ou se o job parar de rodar.
+  emSegundoPlano(
+    gravarElencoBase(getDb(context.env), {
+      clubeId: params.id,
+      ligaCode: club.league?.code ?? null,
+      club,
+    }),
+  );
 
   const ages = club.players
     .map((p) => p.age)
@@ -196,34 +221,64 @@ export default function Clube({loaderData}: Route.ComponentProps) {
           label="Estrangeiros"
           value={foreigners === null ? '—' : String(foreigners)}
         />
-        <StatTile
-          label={`Contratações ${transfers?.seasonLabel ?? ''}`.trim()}
-          value={
-            transfers
-              ? String(
-                  transfers.arrivals.filter((a) => a.kind !== 'retorno').length,
-                )
-              : '—'
-          }
-        />
+        {/* o único número que não sai do elenco: espera a raspagem das
+            contratações, então mostra uma barra no lugar do valor */}
+        <Suspense fallback={<StatTileCarregando label="Contratações" />}>
+          <Await resolve={transfers}>
+            {(t) => (
+              <StatTile
+                label={`Contratações ${t?.seasonLabel ?? ''}`.trim()}
+                value={
+                  t
+                    ? String(
+                        t.arrivals.filter((a) => a.kind !== 'retorno').length,
+                      )
+                    : '—'
+                }
+              />
+            )}
+          </Await>
+        </Suspense>
       </div>
 
       <div className="mt-8 grid gap-10 lg:grid-cols-[1fr_340px]">
         <div className="min-w-0 space-y-10">
-          <ClubFormSection
-            title="Últimos jogos"
-            matches={form.last}
-            empty="Nenhum jogo disputado encontrado para este clube."
-          />
-          <ClubFormSection
-            title="Próximos jogos"
-            matches={form.next}
-            empty="Nenhum jogo futuro agendado no momento."
-          />
+          {/* os dois blocos de jogos vêm da mesma raspagem, então dividem um
+              `Suspense` só: separá-los faria um aparecer sozinho e a coluna
+              pular duas vezes em vez de uma */}
+          <Suspense
+            fallback={
+              <>
+                <SkeletonLista titulo="Últimos jogos" linhas={5} />
+                <SkeletonLista titulo="Próximos jogos" linhas={3} />
+              </>
+            }
+          >
+            <Await resolve={form}>
+              {(f) => (
+                <>
+                  <ClubFormSection
+                    title="Últimos jogos"
+                    matches={f.last}
+                    empty="Nenhum jogo disputado encontrado para este clube."
+                  />
+                  <ClubFormSection
+                    title="Próximos jogos"
+                    matches={f.next}
+                    empty="Nenhum jogo futuro agendado no momento."
+                  />
+                </>
+              )}
+            </Await>
+          </Suspense>
 
-          {transfers ? (
-            <ClubSignings clubId={id} transfers={transfers} />
-          ) : null}
+          <Suspense
+            fallback={<SkeletonLista titulo="Contratações" linhas={4} />}
+          >
+            <Await resolve={transfers}>
+              {(t) => (t ? <ClubSignings clubId={id} transfers={t} /> : null)}
+            </Await>
+          </Suspense>
 
           <section>
             <SectionTitle>Elenco</SectionTitle>
@@ -304,6 +359,30 @@ export default function Clube({loaderData}: Route.ComponentProps) {
           <AdSlot />
           <ProCard />
         </aside>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Um `StatTile` com o rótulo real e o número ainda em esqueleto.
+ *
+ * Mantém a mesma caixa e a mesma altura do valor final, para o bloco de quatro
+ * números não reflowar quando o último chegar.
+ */
+function StatTileCarregando({label}: {label: string}) {
+  return (
+    <div
+      className="rounded-card border border-line bg-card px-4 py-3"
+      role="status"
+      aria-busy="true"
+    >
+      <div className="text-[10px] font-bold tracking-[0.12em] text-faint uppercase">
+        {label}
+      </div>
+      <span className="sr-only">Carregando {label.toLowerCase()}…</span>
+      <div className="mt-1 flex h-7 items-center">
+        <Skeleton className="h-5 w-10" />
       </div>
     </div>
   );

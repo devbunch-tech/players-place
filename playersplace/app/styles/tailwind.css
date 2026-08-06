@@ -100,9 +100,30 @@
   animation: ppRolar 0.9s linear infinite alternate;
 }
 
+/* barra fina de navegação — vai e volta porque não há progresso real a medir:
+   o servidor não avisa quanto falta, e uma barra que "enche" mentiria */
+@keyframes ppProgresso {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+
+@utility pp-progresso {
+  animation: ppProgresso 1.1s ease-in-out infinite;
+}
+
 /* respeita quem pediu menos movimento no sistema */
 @media (prefers-reduced-motion: reduce) {
-  .pp-rolar {
+  .pp-rolar,
+  .pp-progresso,
+  .pp-pulse {
     animation: none;
+  }
+  /* sem a pulsação o esqueleto ficaria indistinguível de conteúdo vazio */
+  .pp-pulse {
+    opacity: 0.5;
   }
 }

@@ -39,12 +39,18 @@ export const LEAGUES: League[] = [
   // Peru joga em turnos: TDeC é o Clausura. O Apertura tem outro código, do
   // mesmo jeito que a Argentina (ARGC/ARG1) — trocar a cada semestre.
   {code: 'TDeC', name: 'Liga 1 Clausura', country: 'Peru', flag: '🇵🇪', region: 'América do Sul', short: 'PE', color: '#A8202E'},
+  // México joga em turnos, mas aqui os dois entram como ligas separadas (e não
+  // rodiziando um código só, como Argentina e Peru): são páginas distintas e
+  // permanentes no Transfermarkt, então não há o que trocar a cada semestre.
+  {code: 'MEXA', name: 'Liga MX Apertura', country: 'México', flag: '🇲🇽', region: 'América do Norte', short: 'MA', color: '#046A38'},
+  {code: 'MEX1', name: 'Liga MX Clausura', country: 'México', flag: '🇲🇽', region: 'América do Norte', short: 'MC', color: '#8C1D2C'},
   {code: 'MLS1', name: 'Major League Soccer', country: 'Estados Unidos', flag: '🇺🇸', region: 'América do Norte', short: 'ML', color: '#C39BD3'},
   {code: 'CDN1', name: 'Canadian Premier League', country: 'Canadá', flag: '🇨🇦', region: 'América do Norte', short: 'CP', color: '#AD1F2D'},
   {code: 'JAP1', name: 'J1 League', country: 'Japão', flag: '🇯🇵', region: 'Ásia', short: 'J1', color: '#C8102E'},
   {code: 'CSL', name: 'Chinese Super League', country: 'China', flag: '🇨🇳', region: 'Ásia', short: 'CN', color: '#B8232F'},
   {code: 'SA1', name: 'Saudi Pro League', country: 'Arábia Saudita', flag: '🇸🇦', region: 'Oriente Médio', short: 'SP', color: '#165D31'},
   {code: 'QSL', name: 'Qatar Stars League', country: 'Catar', flag: '🇶🇦', region: 'Oriente Médio', short: 'QS', color: '#722F37'},
+  {code: 'UAE1', name: 'UAE Pro League', country: 'Emirados Árabes Unidos', flag: '🇦🇪', region: 'Oriente Médio', short: 'AE', color: '#B08D2E'},
 ];
 
 export const REGIONS: Region[] = [

@@ -1,23 +1,33 @@
 /**
- * Indicador global de carregamento.
+ * Indicador global de navegação.
  *
- * Cobre a página inteira com um véu translúcido e fica no centro **até a
- * navegação terminar** — não há tempo máximo. O véu também serve de barreira:
- * captura o clique e impede que o visitante acione algo na página que já está
- * saindo de cena.
+ * ANTES: cobria a página inteira com um véu translúcido que também barrava o
+ * clique, e ficava assim até a navegação terminar. Fazia sentido quando o
+ * loader esperava TODO o conteúdo antes de renderizar — não havia página por
+ * baixo do véu para o visitante usar.
  *
- * O que segura isso em pé é o stale-while-revalidate de `lib/tm/client.ts`:
- * com ele quase toda navegação responde em ~0,2 s. Sem aquilo, uma competição
- * com cache frio levava até 16 s, e travar a tela por todo esse tempo seria
- * pior do que não ter indicador nenhum.
+ * AGORA os loaders resolvem só o essencial (o topo, que sai da
+ * `jogadores_base` em ~30 ms) e mandam cada painel pesado em streaming, com
+ * esqueleto próprio. O véu passou a atrapalhar: escondia uma página que já
+ * estava pronta e bloqueava cliques em links que já dava para usar.
+ *
+ * Então este componente virou duas coisas discretas:
+ *
+ *  1. uma barra fina no topo, que anda enquanto a navegação não fecha;
+ *  2. depois de alguns segundos, um aviso no rodapé com a bola e uma
+ *     curiosidade — para a espera longa não parecer travamento.
+ *
+ * Nenhum dos dois cobre conteúdo nem captura clique: quem espera continua
+ * podendo navegar. O carregamento de cada área agora é problema da área,
+ * resolvido pelos `<Suspense>` de cada rota.
  */
 import {useEffect, useState} from 'react';
 import {useNavigation} from 'react-router';
 import {CURIOSIDADES, embaralhar, type Curiosidade} from '~/lib/curiosidades';
 
 /**
- * Navegação instantânea não deve piscar a tela. Só aparece se a requisição
- * passar deste tempo — abaixo disso o visitante nem percebe que houve espera.
+ * Navegação instantânea não deve piscar nada. Com o streaming a maioria das
+ * navegações fecha bem abaixo disto e o indicador nem chega a aparecer.
  */
 const ATRASO_ATE_APARECER = 200;
 
@@ -71,44 +81,48 @@ export function BolaRolando() {
   if (!visivel) return null;
 
   return (
-    <div
-      // sem `pointer-events-none`: é justamente o véu que bloqueia o clique
-      className="pp-in fixed inset-0 z-50 flex items-center justify-center bg-paper/75 backdrop-blur-[2px]"
-      // `status` + `polite` anuncia para leitor de tela sem roubar o foco;
-      // `aria-busy` diz que o conteúdo por baixo está em transição
-      role="status"
-      aria-live="polite"
-      aria-busy="true"
-    >
-      <div className="flex max-w-md flex-col items-center gap-3 px-6 text-center">
-        <Bola />
-        <span className="text-sm font-bold text-ink">Bola rolando…</span>
-
-        {curiosidade ? (
-          // `key` no texto: remonta o elemento a cada troca, e a animação de
-          // entrada roda de novo em vez de o texto trocar seco
-          <p
-            key={curiosidade.texto}
-            className="pp-in mt-1 text-[13px] leading-relaxed text-muted"
-          >
-            {curiosidade.texto}
-          </p>
-        ) : null}
+    <>
+      {/* `pointer-events-none` em tudo daqui para baixo é o ponto da mudança:
+          o indicador informa, não interdita */}
+      <div
+        className="pointer-events-none fixed inset-x-0 top-0 z-50 h-[3px] overflow-hidden bg-transparent"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+      >
+        <div className="pp-progresso h-full w-2/5 bg-pitch" />
+        <span className="sr-only">Carregando página…</span>
       </div>
-    </div>
+
+      {curiosidade ? (
+        <div className="pointer-events-none fixed inset-x-0 bottom-4 z-50 flex justify-center px-4">
+          {/* `key` no texto: remonta o elemento a cada troca, e a animação de
+              entrada roda de novo em vez de o texto trocar seco */}
+          <div
+            key={curiosidade.texto}
+            className="pp-in flex max-w-md items-center gap-3 rounded-card border border-line bg-card/95 px-4 py-2.5 shadow-lg backdrop-blur-sm"
+          >
+            <Bola />
+            <p className="text-[13px] leading-snug text-muted">
+              {curiosidade.texto}
+            </p>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 
 /**
- * Bola de futebol simplificada. O `circle` tem contorno próprio porque agora
- * ela fica sobre o véu claro, e uma bola branca sem borda sumiria no fundo.
+ * Bola de futebol simplificada. O `circle` tem contorno próprio porque ela
+ * fica sobre o cartão claro, e uma bola branca sem borda sumiria no fundo.
  */
 function Bola() {
   return (
     <svg
-      className="pp-rolar"
-      width="52"
-      height="52"
+      className="pp-rolar shrink-0"
+      width="26"
+      height="26"
       viewBox="0 0 24 24"
       aria-hidden
     >

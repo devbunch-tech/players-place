@@ -5,6 +5,7 @@
 import {
   cached,
   cachedRegistro,
+  renovar,
   tmApiJson,
   tmHtml,
   tmJson,
@@ -128,15 +129,34 @@ export function getGlobalTopPlayers(): Promise<RankedPlayer[]> {
   );
 }
 
+/**
+ * Chave, validade e busca do elenco num lugar só.
+ *
+ * Ficam agrupados porque o aquecimento (`renovarClube`) precisa dos MESMOS
+ * três para escrever na entrada que a leitura vai consultar depois. Repetir a
+ * string da chave nos dois lugares deixaria o job aquecer `club:210` enquanto
+ * a página lê `clube:210` — e ninguém perceberia, porque os dois continuariam
+ * funcionando, só que sem nunca se encontrarem.
+ */
+const CLUBE = {
+  chave: (id: string) => `club:${id}`,
+  ttl: 6 * HOUR,
+  buscar: async (id: string) =>
+    parseClub(await tmHtml(`/-/startseite/verein/${id}`)),
+};
+
 /** o elenco do clube com a procedência — ver `getPlayerRegistro` */
 export function getClubRegistro(id: string): Promise<Registro<ClubProfile>> {
-  return cachedRegistro(`club:${id}`, 6 * HOUR, async () =>
-    parseClub(await tmHtml(`/-/startseite/verein/${id}`)),
-  );
+  return cachedRegistro(CLUBE.chave(id), CLUBE.ttl, () => CLUBE.buscar(id));
 }
 
 export async function getClub(id: string): Promise<ClubProfile> {
   return (await getClubRegistro(id)).valor;
+}
+
+/** elenco direto da origem, ignorando o cache — ver `renovar()` */
+export function renovarClube(id: string): Promise<ClubProfile> {
+  return renovar(CLUBE.chave(id), CLUBE.ttl, () => CLUBE.buscar(id));
 }
 
 export interface RodadaInfo {

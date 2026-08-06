@@ -1,4 +1,5 @@
-import {Link} from 'react-router';
+import {Suspense} from 'react';
+import {Await, Link} from 'react-router';
 import type {Route} from './+types/competicoes.$code';
 import {findLeague, leagueLogo} from '~/lib/tm/leagues';
 import {
@@ -16,6 +17,9 @@ import {
   DadosSalvos,
   LeagueLogo,
   SectionTitle,
+  SkeletonCartao,
+  SkeletonLista,
+  SkeletonTabela,
   StatTile,
 } from '~/components/ui';
 import {AdSlot} from '~/components/AdSlot';
@@ -78,14 +82,20 @@ export async function loader({params, request}: Route.LoaderArgs) {
   // o código canônico da lista, e não o da URL: o Transfermarkt diferencia
   // caixa (TDeC ≠ TDEC), então normalizar para maiúsculas quebrava o Peru
   const code = league?.code ?? params.code.toUpperCase();
-  const [registro, standings, topPlayers, stats, round] = await Promise.all([
-    getLeagueOverviewRegistro(code).catch(() => null),
-    getLeagueStandings(code).catch(() => []),
-    getLeagueTopPlayers(code).catch(() => []),
-    // estatísticas são complemento: se falharem, a página da liga continua
-    getLeagueStats(code).catch(() => ({scorers: [], assists: []})),
-    getRoundFixtures(code, rodada).catch(() => null),
-  ]);
+
+  // As cinco raspagens continuam partindo juntas, mas só a primeira é esperada:
+  // dela saem o título, os clubes e os três números do topo. As outras quatro
+  // descem em streaming, cada uma no seu `<Suspense>` — era esta página que
+  // media 16 s de TTFB com o cache frio, justamente por esperar as cinco.
+  const standings = getLeagueStandings(code).catch(() => []);
+  const topPlayers = getLeagueTopPlayers(code)
+    .catch(() => [])
+    .then((p) => p.slice(0, 10));
+  // estatísticas são complemento: se falharem, a página da liga continua
+  const stats = getLeagueStats(code).catch(() => ({scorers: [], assists: []}));
+  const round = getRoundFixtures(code, rodada).catch(() => null);
+
+  const registro = await getLeagueOverviewRegistro(code).catch(() => null);
   const overview = registro?.valor;
   // 502 só quando não há cópia salva em nenhuma camada E a origem falhou
   if (!overview || overview.clubs.length === 0) {
@@ -107,12 +117,13 @@ export async function loader({params, request}: Route.LoaderArgs) {
     overview,
     atualizadoEm: registro.fresco ? null : rotuloAtualizacao(registro.salvoEm),
     clubsSorted,
-    standings,
-    topPlayers: topPlayers.slice(0, 10),
-    stats,
-    round,
     totalValue: sumValues(overview.clubs.map((c) => c.totalValue)),
     totalPlayers,
+    // daqui para baixo, tudo desce em streaming
+    standings,
+    topPlayers,
+    stats,
+    round,
   };
 }
 
@@ -166,21 +177,29 @@ export default function Competicao({loaderData}: Route.ComponentProps) {
         {/* min-w-0 obrigatório: sem ele a tabela de artilheiros estica a
             coluna e a página ganha scroll horizontal no mobile */}
         <div className="min-w-0 space-y-10">
-          {round?.totalRounds ? (
-            <section>
-              <SectionTitle
-                action={
-                  <RoundNav
-                    rodada={round}
-                    href={(n) => `/competicoes/${code}?rodada=${n}`}
-                  />
-                }
-              >
-                Jogos da rodada
-              </SectionTitle>
-              <RoundFixtures round={round.round} fixtures={round.fixtures} />
-            </section>
-          ) : null}
+          <Suspense
+            fallback={<SkeletonLista titulo="Jogos da rodada" linhas={5} />}
+          >
+            <Await resolve={round}>
+              {(r) =>
+                r?.totalRounds ? (
+                  <section>
+                    <SectionTitle
+                      action={
+                        <RoundNav
+                          rodada={r}
+                          href={(n) => `/competicoes/${code}?rodada=${n}`}
+                        />
+                      }
+                    >
+                      Jogos da rodada
+                    </SectionTitle>
+                    <RoundFixtures round={r.round} fixtures={r.fixtures} />
+                  </section>
+                ) : null
+              }
+            </Await>
+          </Suspense>
 
           <section>
             <SectionTitle>Clubes mais valiosos</SectionTitle>
@@ -209,136 +228,179 @@ export default function Competicao({loaderData}: Route.ComponentProps) {
             </div>
           </section>
 
-          {standings.length > 0 ? (
-            <section>
-              <SectionTitle>Classificação</SectionTitle>
-              <div className="space-y-6">
-                {standings.map((g, gi) => (
-                  <div
-                    key={gi}
-                    className="overflow-hidden rounded-card border border-line bg-card"
-                  >
-                    {g.title && standings.length > 1 ? (
-                      <div className="border-b border-innerline px-4 py-2.5 text-xs font-bold tracking-wide text-muted uppercase">
-                        {g.title}
-                      </div>
-                    ) : null}
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-[560px] text-[13px] tabular-nums">
-                        <thead>
-                          <tr className="border-b border-innerline text-left text-[11px] font-bold tracking-wide text-faint uppercase">
-                            <th className="px-3 py-2.5 text-center">#</th>
-                            <th className="px-3 py-2.5">Clube</th>
-                            <th className="px-3 py-2.5 text-center">J</th>
-                            <th className="px-3 py-2.5 text-center">V</th>
-                            <th className="px-3 py-2.5 text-center">E</th>
-                            <th className="px-3 py-2.5 text-center">D</th>
-                            <th className="px-3 py-2.5 text-center">Gols</th>
-                            <th className="px-3 py-2.5 text-center">+/-</th>
-                            <th className="px-3 py-2.5 text-center">Pts</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {g.rows.map((r) => (
-                            <tr
-                              key={`${r.pos}-${r.clubId}`}
-                              className="border-b border-innerline last:border-b-0 hover:bg-hoverrow"
-                            >
-                              <td className="px-3 py-2.5 text-center font-bold text-muted">
-                                {r.pos}
-                              </td>
-                              <td className="px-3 py-2.5">
-                                {r.clubId ? (
-                                  <Link
-                                    to={`/clubes/${r.clubId}`}
-                                    className="flex items-center gap-2 font-semibold hover:text-pitch"
+          <Suspense
+            fallback={
+              <SkeletonTabela titulo="Classificação" linhas={10} colunas={9} />
+            }
+          >
+            <Await resolve={standings}>
+              {(grupos) =>
+                grupos.length > 0 ? (
+                  <section>
+                    <SectionTitle>Classificação</SectionTitle>
+                    <div className="space-y-6">
+                      {grupos.map((g, gi) => (
+                        <div
+                          key={gi}
+                          className="overflow-hidden rounded-card border border-line bg-card"
+                        >
+                          {g.title && grupos.length > 1 ? (
+                            <div className="border-b border-innerline px-4 py-2.5 text-xs font-bold tracking-wide text-muted uppercase">
+                              {g.title}
+                            </div>
+                          ) : null}
+                          <div className="overflow-x-auto">
+                            <table className="w-full min-w-[560px] text-[13px] tabular-nums">
+                              <thead>
+                                <tr className="border-b border-innerline text-left text-[11px] font-bold tracking-wide text-faint uppercase">
+                                  <th className="px-3 py-2.5 text-center">#</th>
+                                  <th className="px-3 py-2.5">Clube</th>
+                                  <th className="px-3 py-2.5 text-center">J</th>
+                                  <th className="px-3 py-2.5 text-center">V</th>
+                                  <th className="px-3 py-2.5 text-center">E</th>
+                                  <th className="px-3 py-2.5 text-center">D</th>
+                                  <th className="px-3 py-2.5 text-center">
+                                    Gols
+                                  </th>
+                                  <th className="px-3 py-2.5 text-center">
+                                    +/-
+                                  </th>
+                                  <th className="px-3 py-2.5 text-center">
+                                    Pts
+                                  </th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {g.rows.map((r) => (
+                                  <tr
+                                    key={`${r.pos}-${r.clubId}`}
+                                    className="border-b border-innerline last:border-b-0 hover:bg-hoverrow"
                                   >
-                                    <Crest
-                                      src={r.crest}
-                                      name={r.club}
-                                      size={18}
-                                    />
-                                    {r.club}
-                                  </Link>
-                                ) : (
-                                  r.club
-                                )}
-                              </td>
-                              <td className="px-3 py-2.5 text-center text-muted">
-                                {r.played}
-                              </td>
-                              <td className="px-3 py-2.5 text-center text-muted">
-                                {r.won}
-                              </td>
-                              <td className="px-3 py-2.5 text-center text-muted">
-                                {r.draw}
-                              </td>
-                              <td className="px-3 py-2.5 text-center text-muted">
-                                {r.lost}
-                              </td>
-                              <td className="px-3 py-2.5 text-center text-muted">
-                                {r.goals}
-                              </td>
-                              <td className="px-3 py-2.5 text-center text-muted">
-                                {r.diff}
-                              </td>
-                              <td className="px-3 py-2.5 text-center font-extrabold">
-                                {r.points}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                                    <td className="px-3 py-2.5 text-center font-bold text-muted">
+                                      {r.pos}
+                                    </td>
+                                    <td className="px-3 py-2.5">
+                                      {r.clubId ? (
+                                        <Link
+                                          to={`/clubes/${r.clubId}`}
+                                          className="flex items-center gap-2 font-semibold hover:text-pitch"
+                                        >
+                                          <Crest
+                                            src={r.crest}
+                                            name={r.club}
+                                            size={18}
+                                          />
+                                          {r.club}
+                                        </Link>
+                                      ) : (
+                                        r.club
+                                      )}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-center text-muted">
+                                      {r.played}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-center text-muted">
+                                      {r.won}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-center text-muted">
+                                      {r.draw}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-center text-muted">
+                                      {r.lost}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-center text-muted">
+                                      {r.goals}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-center text-muted">
+                                      {r.diff}
+                                    </td>
+                                    <td className="px-3 py-2.5 text-center font-extrabold">
+                                      {r.points}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
+                  </section>
+                ) : null
+              }
+            </Await>
+          </Suspense>
 
-          <StatLeaders
-            title="Artilheiros"
-            rows={stats.scorers}
-            metricLabel="G"
-          />
-          <StatLeaders
-            title="Líderes de assistência"
-            rows={stats.assists}
-            metricLabel="A"
-          />
+          {/* artilheiros e assistências vêm da mesma raspagem: um `Suspense` só
+              evita a coluna pular duas vezes seguidas */}
+          <Suspense
+            fallback={
+              <>
+                <SkeletonLista titulo="Artilheiros" linhas={6} />
+                <SkeletonLista titulo="Líderes de assistência" linhas={6} />
+              </>
+            }
+          >
+            <Await resolve={stats}>
+              {(s) => (
+                <>
+                  <StatLeaders
+                    title="Artilheiros"
+                    rows={s.scorers}
+                    metricLabel="G"
+                  />
+                  <StatLeaders
+                    title="Líderes de assistência"
+                    rows={s.assists}
+                    metricLabel="A"
+                  />
+                </>
+              )}
+            </Await>
+          </Suspense>
         </div>
 
         <aside className="min-w-0 space-y-6">
-          {topPlayers.length > 0 ? (
-            <section className="rounded-card border border-line bg-card p-4">
-              <h2 className="mb-2 font-display text-base font-extrabold tracking-tight">
-                Jogadores mais valiosos
-              </h2>
-              {topPlayers.map((p, i) => (
-                <Link
-                  key={p.id}
-                  to={`/jogadores/${p.id}`}
-                  className="-mx-2 flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-hoverrow"
-                >
-                  <span className="w-4 text-center text-xs font-bold text-faint tabular-nums">
-                    {i + 1}
-                  </span>
-                  <Avatar src={p.photo} name={p.name} size={32} />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13px] font-bold">
-                      {p.name}
-                    </div>
-                    <div className="truncate text-xs text-faint">
-                      {p.club?.name} · {p.position}
-                    </div>
-                  </div>
-                  <span className="text-[13px] font-extrabold tabular-nums">
-                    {p.value}
-                  </span>
-                </Link>
-              ))}
-            </section>
-          ) : null}
+          <Suspense
+            fallback={
+              <SkeletonCartao titulo="Jogadores mais valiosos" linhas={6} />
+            }
+          >
+            <Await resolve={topPlayers}>
+              {(lista) =>
+                lista.length > 0 ? (
+                  <section className="rounded-card border border-line bg-card p-4">
+                    <h2 className="mb-2 font-display text-base font-extrabold tracking-tight">
+                      Jogadores mais valiosos
+                    </h2>
+                    {lista.map((p, i) => (
+                      <Link
+                        key={p.id}
+                        to={`/jogadores/${p.id}`}
+                        className="-mx-2 flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-hoverrow"
+                      >
+                        <span className="w-4 text-center text-xs font-bold text-faint tabular-nums">
+                          {i + 1}
+                        </span>
+                        <Avatar src={p.photo} name={p.name} size={32} />
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-[13px] font-bold">
+                            {p.name}
+                          </div>
+                          <div className="truncate text-xs text-faint">
+                            {p.club?.name} · {p.position}
+                          </div>
+                        </div>
+                        <span className="text-[13px] font-extrabold tabular-nums">
+                          {p.value}
+                        </span>
+                      </Link>
+                    ))}
+                  </section>
+                ) : null
+              }
+            </Await>
+          </Suspense>
           <AdSlot />
           <ProCard />
         </aside>
