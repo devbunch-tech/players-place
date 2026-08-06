@@ -84,6 +84,10 @@ jobs:
       #
       # Em lotes porque o Worker tem teto de subrequests por requisição: o
       # endpoint devolve `proximo` e o laço continua de onde parou.
+      #
+      # Roda ANTES da visita às páginas de clube de propósito: é ele que enche
+      # a `jogadores_base`, que é de onde a página do clube se vira quando o
+      # Transfermarkt está fora do ar.
       - name: Materializa os elencos do Brasileirão
         env:
           BASE: ${{ vars.SITE_URL }}
@@ -130,5 +134,54 @@ jobs:
                 console.log(liga + ': ' + clubes + ' clubes, ' + jogadores + ' jogadores');
               }
               if (falhou) process.exit(1);
+            })();
+          "
+
+      # Visita as páginas de clube.
+      #
+      # POR QUE ESTE PASSO EXISTE: em 06/08/2026 o Transfermarkt saiu do ar e
+      # TODA página de clube devolveu 502, enquanto competições e valores
+      # continuaram servindo normalmente. A diferença era esta lista: ela nunca
+      # incluiu `/clubes/:id`, então a chave `club:<id>` nunca foi parar no
+      # cache durável (L3) e não havia cópia velha para servir. As páginas que
+      # este job já visitava foram exatamente as que sobreviveram.
+      #
+      # Os ids saem das próprias páginas de competição — já aquecidas no passo
+      # anterior — para a lista não virar uma segunda verdade a manter à mão.
+      - name: Visita as páginas de clube
+        env:
+          BASE: ${{ vars.SITE_URL }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const base = process.env.BASE || 'https://www.playersplace.com.br';
+            const src = fs.readFileSync('playersplace/app/lib/tm/leagues.ts', 'utf8');
+            const codes = [...src.matchAll(/\{code: '([^']+)'/g)].map(m => m[1]);
+
+            (async () => {
+              const ids = new Set();
+              for (const c of codes) {
+                const r = await fetch(base + '/competicoes/' + c);
+                if (!r.ok) { console.log('::warning::competicoes/' + c + ' respondeu ' + r.status); continue; }
+                const html = await r.text();
+                for (const m of html.matchAll(/\/clubes\/(\d+)/g)) ids.add(m[1]);
+              }
+
+              console.log('clubes encontrados: ' + ids.size);
+              let erros = 0;
+              for (const id of ids) {
+                const t = Date.now();
+                const r = await fetch(base + '/clubes/' + id).catch(() => null);
+                const ms = Date.now() - t;
+                if (!r || !r.ok) { erros++; console.log('::warning::clubes/' + id + ' respondeu ' + (r ? r.status : 'erro de rede')); }
+                else if (ms > 3000) console.log('clubes/' + id + ' estava frio (' + ms + 'ms)');
+                await new Promise(s => setTimeout(s, 1000));
+              }
+
+              console.log('----');
+              console.log('clubes: ' + ids.size + ' · com erro: ' + erros);
+              // mesma postura do passo das páginas: um clube fora do ar não
+              // pode apagar o sinal de que o aquecimento rodou
+              if (erros > ids.size / 4) { console.log('::error::' + erros + ' de ' + ids.size + ' clubes falharam'); process.exit(1); }
             })();
           "

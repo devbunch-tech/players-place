@@ -397,8 +397,78 @@ export async function renovar<T>(
   return value;
 }
 
+/**
+ * Disjuntor da origem.
+ *
+ * Quando o Transfermarkt cai, ele não recusa a conexão: aceita o TLS e segura
+ * a requisição sem devolver um byte até estourar o `AbortSignal.timeout`.
+ * Medido em 06/08/2026, com o site deles fora do ar — inclusive o `robots.txt`
+ * e o `.de`: cada página de clube sem cópia em cache gastava 20s de Worker
+ * para terminar em 502.
+ *
+ * Sem disjuntor, cada visitante paga esses 20s por página e o Worker fica com
+ * dezenas de requisições penduradas que não tinham chance de dar certo. Depois
+ * de `FALHAS_ATE_ABRIR` falhas seguidas as chamadas passam a estourar na hora
+ * durante `JANELA_ABERTO`, o que devolve a decisão para as camadas de cache e
+ * para o fallback da página — que é onde ela deve ser tomada.
+ *
+ * A primeira chamada depois da janela passa: é ela que descobre que a origem
+ * voltou, e um acerto zera a contagem.
+ *
+ * O estado é de módulo, ou seja, POR ISOLATE — dois isolates abrem o disjuntor
+ * separadamente. Deixar assim é deliberado: compartilhar isso exigiria um
+ * Durable Object, e o ganho que importa (não pendurar 20s repetidos no mesmo
+ * isolate quente) já vem daqui.
+ */
+const FALHAS_ATE_ABRIR = 3;
+const JANELA_ABERTO = 60_000;
+
+let falhasSeguidas = 0;
+let abertoAte = 0;
+
+/** distingue "a origem está fora" de "a origem respondeu um erro" */
+export class OrigemIndisponivel extends Error {
+  constructor(causa?: string) {
+    super(`Transfermarkt indisponível${causa ? `: ${causa}` : ''}`);
+    this.name = 'OrigemIndisponivel';
+  }
+}
+
+function registrarFalhaDeRede(): void {
+  if (++falhasSeguidas >= FALHAS_ATE_ABRIR) {
+    abertoAte = Date.now() + JANELA_ABERTO;
+  }
+}
+
+function registrarAcerto(): void {
+  falhasSeguidas = 0;
+  abertoAte = 0;
+}
+
+/** o fetch da origem com o disjuntor em volta, comum aos dois hosts */
+async function comDisjuntor(
+  entrada: string,
+  init: RequestInit,
+): Promise<Response> {
+  if (Date.now() < abertoAte) {
+    throw new OrigemIndisponivel('disjuntor aberto');
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(entrada, init);
+  } catch (e) {
+    // só falha de rede/timeout abre o disjuntor: um 404 é a origem funcionando
+    registrarFalhaDeRede();
+    throw new OrigemIndisponivel((e as Error).message);
+  }
+
+  registrarAcerto();
+  return res;
+}
+
 async function tmFetch(path: string, accept: string): Promise<Response> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await comDisjuntor(`${BASE}${path}`, {
     headers: {
       'User-Agent': UA,
       'Accept-Language': 'pt-BR,pt;q=0.9',
@@ -426,7 +496,9 @@ export async function tmJson<T>(path: string): Promise<T> {
 const API_BASE = 'https://tmapi.transfermarkt.technology';
 
 export async function tmApiJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
+  // mesmo disjuntor do host de HTML: quando o Transfermarkt cai, cai junto —
+  // medido no mesmo incidente, a API JSON travava exatamente igual
+  const res = await comDisjuntor(`${API_BASE}${path}`, {
     headers: {
       'User-Agent': UA,
       Accept: 'application/json',

@@ -31,7 +31,7 @@
  * com a chave service_role e não pode acabar no bundle do navegador.
  */
 import type {Db} from '~/lib/db';
-import {euroToMillions} from '~/lib/format';
+import {euroToMillions, sumValues} from '~/lib/format';
 import {findLeague, type ClubProfile} from '~/lib/tm';
 
 const TABELA = 'jogadores_base';
@@ -158,6 +158,66 @@ export async function lerElencoBase(
   } catch {
     return [];
   }
+}
+
+/**
+ * O clube remontado a partir da base achatada, ou null se não há elenco salvo.
+ *
+ * POR QUE EXISTE: em 06/08/2026 o Transfermarkt saiu do ar e TODA página de
+ * clube passou a devolver 502. As três camadas de `tm/client.ts` não seguraram
+ * porque nenhuma delas tinha `club:<id>` — o aquecimento só visitava páginas de
+ * competição, então a chave nunca chegou ao L3 e não havia cópia velha para
+ * servir. A `jogadores_base`, por outro lado, é escrita explicitamente pelo
+ * `/api/aquecer`, com uma linha por jogador.
+ *
+ * O que volta daqui é menos do que a raspagem: não há forma recente, nem
+ * transferências, e o valor total é a soma dos jogadores em vez do número que o
+ * Transfermarkt publica (que desconta empréstimos). É de propósito — a escolha
+ * aqui é entre uma página um pouco mais pobre e nenhuma página.
+ *
+ * Não filtra por validade: cópia velha é exatamente o que se quer quando a
+ * alternativa é o erro. Quem chama já tentou o cache antes.
+ */
+export async function lerClubeBase(
+  db: Db | null,
+  clubeId: string,
+): Promise<{club: ClubProfile; salvoEm: number | null} | null> {
+  const elenco = await lerElencoBase(db, clubeId);
+  if (!elenco.length) return null;
+
+  // todas as linhas do clube carregam o mesmo nome/escudo desnormalizado;
+  // a primeira serve de cabeçalho
+  const [primeiro] = elenco;
+  if (!primeiro.clube?.nome) return null;
+
+  // a página mostra "Dados de …", e aqui a marca honesta é a da linha mais
+  // recente: o aquecimento reescreve o elenco inteiro numa passada só
+  const marcas = elenco
+    .map((j) => j.atualizadoEm)
+    .filter((m) => !Number.isNaN(m));
+
+  return {
+    salvoEm: marcas.length ? Math.max(...marcas) : null,
+    club: {
+      name: primeiro.clube.nome,
+      crest: primeiro.clube.escudo,
+      league: primeiro.liga
+        ? {code: primeiro.liga.code, name: primeiro.liga.nome}
+        : null,
+      totalValue: sumValues(elenco.map((j) => j.valor)),
+      players: elenco.map((j) => ({
+        id: j.id,
+        name: j.nome,
+        photo: j.foto,
+        number: j.numero,
+        position: j.posicao,
+        birth: j.nascimento,
+        age: j.idade,
+        nationality: j.nacionalidade,
+        value: j.valor,
+      })),
+    },
+  };
 }
 
 /**

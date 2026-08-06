@@ -5,7 +5,7 @@ import {findLeague} from '~/lib/tm/leagues';
 import {getClubRegistro, getClubForm, getClubTransfers} from '~/lib/tm';
 import {emSegundoPlano} from '~/lib/tm/client';
 import {getDb} from '~/lib/db';
-import {gravarElencoBase} from '~/lib/jogadores.server';
+import {gravarElencoBase, lerClubeBase} from '~/lib/jogadores.server';
 import {euroToMillions, rotuloAtualizacao} from '~/lib/format';
 import {
   Avatar,
@@ -95,9 +95,30 @@ export async function loader({params, request, context}: Route.LoaderArgs) {
   // os jogos são complemento: se a origem falhar, a página do clube continua
   const form = getClubForm(params.id).catch(() => ({last: [], next: []}));
 
+  const db = getDb(context.env);
+
   const registro = await getClubRegistro(params.id).catch(() => null);
-  const club = registro?.valor;
-  // 502 só quando não há cópia salva em nenhuma camada E a origem falhou
+  let club = registro?.valor;
+  let salvoEm = registro?.salvoEm ?? null;
+  let fresco = registro?.fresco ?? false;
+  // se veio do cache, o elenco é novidade para a `jogadores_base` e vale gravar;
+  // se veio DA base, gravar de volta seria copiar a linha em cima dela mesma
+  let vindoDoCache = Boolean(club?.name);
+
+  // Última rede antes do erro: o elenco achatado que o `/api/aquecer` escreve.
+  // Existe porque as camadas de `tm/client.ts` só seguram o que já passou por
+  // elas — e `club:<id>` pode nunca ter passado. Ver `lerClubeBase`.
+  if (!club || !club.name) {
+    const base = await lerClubeBase(db, params.id);
+    if (base) {
+      club = base.club;
+      salvoEm = base.salvoEm;
+      fresco = false;
+      vindoDoCache = false;
+    }
+  }
+
+  // 502 só quando não há cópia em nenhuma camada, nem na base, E a origem falhou
   if (!club || !club.name) {
     throw new Response('Não foi possível carregar este clube agora.', {
       status: 502,
@@ -108,13 +129,15 @@ export async function loader({params, request, context}: Route.LoaderArgs) {
   // Alimenta a base de jogadores com o elenco que acabamos de ler. Sai de
   // graça — o dado já está aqui — e é o que mantém a `jogadores_base` viva
   // para clubes fora do aquecimento diário, ou se o job parar de rodar.
-  emSegundoPlano(
-    gravarElencoBase(getDb(context.env), {
-      clubeId: params.id,
-      ligaCode: club.league?.code ?? null,
-      club,
-    }),
-  );
+  if (vindoDoCache) {
+    emSegundoPlano(
+      gravarElencoBase(db, {
+        clubeId: params.id,
+        ligaCode: club.league?.code ?? null,
+        club,
+      }),
+    );
+  }
 
   const ages = club.players
     .map((p) => p.age)
@@ -147,7 +170,7 @@ export async function loader({params, request, context}: Route.LoaderArgs) {
   return {
     id: params.id,
     club,
-    atualizadoEm: registro.fresco ? null : rotuloAtualizacao(registro.salvoEm),
+    atualizadoEm: fresco ? null : rotuloAtualizacao(salvoEm),
     league,
     avgAge,
     foreigners,

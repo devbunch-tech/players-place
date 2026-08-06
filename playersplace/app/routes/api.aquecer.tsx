@@ -158,7 +158,7 @@ export async function loader({request, context}: Route.LoaderArgs) {
   const db = getDb(context.env);
   if (!db) return Response.json({erro: 'banco indisponível'}, {status: 503});
 
-  const [{data: execucoes}, {count}] = await Promise.all([
+  const [execucao, contagem] = await Promise.all([
     db
       .from('jogadores_base_execucao')
       .select('*')
@@ -166,5 +166,16 @@ export async function loader({request, context}: Route.LoaderArgs) {
     db.from('jogadores_base').select('id', {count: 'exact', head: true}),
   ]);
 
-  return Response.json({jogadores: count ?? 0, execucoes: execucoes ?? []});
+  // `count ?? 0` sozinho mentia: tabela ausente e tabela vazia devolviam o
+  // mesmo `{jogadores: 0}`, e a migração 005 não aplicada ficava indistinguível
+  // de um aquecimento que ainda não rodou. O erro do Postgres precisa aparecer.
+  const erros = [contagem.error, execucao.error]
+    .filter((e) => e)
+    .map((e) => e!.message);
+
+  return Response.json({
+    jogadores: contagem.count ?? 0,
+    execucoes: execucao.data ?? [],
+    ...(erros.length ? {erros} : {}),
+  });
 }
