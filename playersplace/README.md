@@ -115,10 +115,19 @@ cada 60 s — o `If-Modified-Since` volta 200, nunca 304.
 1. Rodar `supabase/006_espelho.sql` no SQL Editor (é idempotente).
 2. Cadastrar `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` nos *secrets* do
    repositório no GitHub.
-3. O primeiro carregamento são ~130 mil requisições: com o orçamento padrão
-   leva cerca de uma semana de execuções noturnas. Para acelerar, dispare pela
-   aba Actions com `orcamento` maior (o teto útil é ~50000, as 6 h do runner).
-   A fila é retomável — cada jogador é carimbado assim que termina.
+3. O escopo padrão é **raso nas 24 competições, fundo em BRA1+BRA2**: ~2.400
+   requisições de sentinela e ~5.200 de raspagem profunda, o que fecha na
+   primeira noite. A fila é retomável — cada jogador é carimbado assim que
+   termina.
+
+**Antes de aprofundar outra liga, faça a conta.** A `jogadores_base` não contém
+só as 24 competições: toda visita a uma página de clube grava o elenco em
+segundo plano, então ela acumula qualquer clube que alguém (ou um crawler)
+tenha aberto. Em 10/08/2026 eram **125.418 jogadores, dos quais só 3.266** das
+ligas do registro. Rodar `fundo` sem filtro seria 1,25 milhão de requisições —
+139 horas de raspagem contínua. Por isso o `fundo` tem `BRA1,BRA2` como padrão
+no workflow, e ampliar isso é uma decisão consciente, com `ligas` no disparo
+manual.
 
 Localmente:
 

@@ -21,11 +21,17 @@
 #
 # O PRIMEIRO CARREGAMENTO
 #
-# São ~130 mil requisições para cobrir tudo a fundo. Com o orçamento padrão
-# isso leva cerca de uma semana de execuções noturnas, e a fila é retomável:
-# cada jogador é carimbado assim que termina, então um job cortado no meio
-# continua exatamente de onde parou. Para acelerar, dispare manualmente pela
-# aba Actions com um orçamento maior — o teto útil é ~50000 (as 6 h do runner).
+# Com o escopo padrão (raso nas 24, fundo em BRA1+BRA2) são ~2.400 requisições
+# de sentinela e ~5.200 de raspagem profunda: fecha na primeira noite, com
+# folga dentro do orçamento.
+#
+# A fila é retomável — cada jogador é carimbado assim que termina — então um
+# job cortado no meio continua exatamente de onde parou.
+#
+# Para aprofundar outra competição, dispare manualmente com `ligas` e um
+# orçamento maior. Estime antes: são ~10 requisições por jogador, e o teto útil
+# por execução é ~50000 (as 6 h do runner). Ver a nota em LIGAS_FUNDO abaixo
+# antes de pensar em rodar `fundo` sem filtro.
 name: espelho
 
 on:
@@ -42,7 +48,7 @@ on:
         description: 'teto de requisições ao Transfermarkt no modo fundo'
         default: '20000'
       ligas:
-        description: 'códigos separados por vírgula; vazio = todas'
+        description: 'códigos separados por vírgula; vazio = padrão de cada modo'
         default: ''
 
 # Duas execuções ao mesmo tempo dobrariam o ritmo na origem — que é a única
@@ -64,7 +70,22 @@ jobs:
       SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
       MODO: ${{ inputs.modo || 'ambos' }}
       ORCAMENTO: ${{ inputs.orcamento || '20000' }}
-      LIGAS: ${{ inputs.ligas || '' }}
+      # `raso` sem filtro = as 24 competições do registro, que é o que se quer.
+      LIGAS_RASO: ${{ inputs.ligas || '' }}
+      # `fundo` sem filtro seria outra coisa completamente. Medido em
+      # 10/08/2026, a `jogadores_base` tem 125.418 linhas — e só 3.266 delas
+      # são das 24 ligas do registro. O resto entrou por visita avulsa a página
+      # de clube (toda visita grava o elenco em segundo plano), trazendo junto
+      # competições que a plataforma nem lista, como `FIWC`.
+      #
+      # Sem este padrão, o modo `fundo` tentaria raspar 125 mil jogadores × ~10
+      # chaves = 1,25 MILHÃO de requisições ao Transfermarkt: 139 horas de
+      # raspagem contínua, ou dois meses de execuções noturnas. Com BRA1+BRA2 a
+      # fila são ~515 jogadores e o backfill fecha na primeira noite.
+      #
+      # É exatamente o escopo combinado: raso em tudo, fundo no Brasil. Para
+      # aprofundar outra liga, passe `ligas` no disparo manual.
+      LIGAS_FUNDO: ${{ inputs.ligas || 'BRA1,BRA2' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -96,7 +117,7 @@ jobs:
         run: |
           npm run espelho -- raso \
             --orcamento=6000 --minutos=90 \
-            ${LIGAS:+--ligas=$LIGAS}
+            ${LIGAS_RASO:+--ligas=$LIGAS_RASO}
 
       # A raspagem profunda: as ~9 chaves de cada jogador da fila. Enquanto
       # houver jogador nunca raspado ele tem prioridade (é o backfill inicial);
@@ -106,4 +127,4 @@ jobs:
         run: |
           npm run espelho -- fundo \
             --orcamento=$ORCAMENTO --minutos=240 \
-            ${LIGAS:+--ligas=$LIGAS}
+            ${LIGAS_FUNDO:+--ligas=$LIGAS_FUNDO}
