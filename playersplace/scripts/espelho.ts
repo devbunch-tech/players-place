@@ -175,13 +175,34 @@ async function tentar<T>(
   rotulo: string,
   fn: () => Promise<T>,
   padrao: T,
+  registrar?: (erro: unknown) => void,
 ): Promise<T> {
   try {
     return await fn();
   } catch (e) {
     log(`  ! ${rotulo}: ${motivo(e)}`);
+    registrar?.(e);
     return padrao;
   }
+}
+
+/**
+ * A falha diz "não deu para saber", e não "não existe"?
+ *
+ * A distinção decide se o jogador sai da fila. Um 404 é resposta: aquele
+ * jogador não tem página de rumores, e insistir amanhã só gastaria requisição.
+ * Qualquer outra coisa — origem fora do ar, 403, 429, 5xx — significa que a
+ * chave continua faltando no espelho, e ela precisa voltar amanhã.
+ *
+ * POR QUE ISTO EXISTE: medido em 10/08/2026, `tmapi.transfermarkt.technology`
+ * responde 403 (bloqueio de WAF do CloudFront) para algumas redes, enquanto o
+ * host de HTML responde 200 normalmente. Sem esta separação, uma noite inteira
+ * atrás de um IP bloqueado marcaria milhares de jogadores como raspados a
+ * fundo com metade das chaves faltando — e eles NUNCA mais voltariam à fila.
+ * O espelho ficaria permanentemente incompleto, em silêncio.
+ */
+function transitoria(e: unknown): boolean {
+  return !/respondeu 404/.test(motivo(e));
 }
 
 // ---------------------------------------------------------------------------
@@ -329,27 +350,51 @@ async function rodarRaso(db: Db, opcoes: Opcoes) {
  *
  * Cada chave é tentada isoladamente: um jogador sem histórico de seleção não
  * pode custar a carreira dele.
+ *
+ * Devolve quantas chaves ficaram FALTANDO por motivo transitório. Só sai da
+ * fila quem voltou com zero — ver `transitoria`.
  */
-async function rasparFundo(id: string): Promise<void> {
-  await tentar(`ficha ${id}`, () => getPlayer(id), null);
-  await tentar(`desempenho ${id}`, () => getPlayerPerformance(id), []);
-  await tentar(`carreira ${id}`, () => getPlayerCareer(id), null);
-  await tentar(`titularidades ${id}`, () => getPlayerStartsBySeason(id), []);
-  await tentar(`jogos ${id}`, () => getPlayerGameLog(id), null);
-  await tentar(`seleção ${id}`, () => getPlayerNationalCareer(id), []);
-  await tentar(`valor ${id}`, () => getPlayerMarketValueGraph(id), null);
-  await tentar(`transferências ${id}`, () => getPlayerTransfers(id), []);
-  await tentar(`lesões ${id}`, () => getPlayerInjuries(id), []);
-  await tentar(`rumores ${id}`, () => getPlayerRumors(id), []);
+async function rasparFundo(id: string): Promise<number> {
+  let faltando = 0;
+  const anotar = (e: unknown) => {
+    if (transitoria(e)) faltando++;
+  };
+  const k = <T>(rotulo: string, fn: () => Promise<T>, padrao: T) =>
+    tentar(`${rotulo} ${id}`, fn, padrao, anotar);
+
+  await k('ficha', () => getPlayer(id), null);
+  await k('desempenho', () => getPlayerPerformance(id), []);
+  await k('carreira', () => getPlayerCareer(id), null);
+  await k('titularidades', () => getPlayerStartsBySeason(id), []);
+  await k('jogos', () => getPlayerGameLog(id), null);
+  await k('seleção', () => getPlayerNationalCareer(id), []);
+  await k('valor', () => getPlayerMarketValueGraph(id), null);
+  await k('transferências', () => getPlayerTransfers(id), []);
+  await k('lesões', () => getPlayerInjuries(id), []);
+  await k('rumores', () => getPlayerRumors(id), []);
+
+  return faltando;
 }
 
 /** quantos jogadores a fila entrega por vez */
 const LOTE_FILA = 200;
 
+/**
+ * Quantos jogadores seguidos podem voltar quase vazios antes de desistirmos.
+ *
+ * Um jogador com metade das chaves faltando é azar; dez seguidos é a origem
+ * nos recusando — e aí continuar só queima o orçamento inteiro produzindo
+ * linhas incompletas. Melhor terminar em vermelho, com o motivo no log.
+ */
+const FALHAS_SEGUIDAS_ATE_DESISTIR = 10;
+const CHAVES_POR_JOGADOR = 10;
+
 async function rodarFundo(db: Db, opcoes: Opcoes) {
   const limite = Date.now() + opcoes.minutos * 60_000;
   let feitos = 0;
   let novos = 0;
+  let incompletos = 0;
+  let seguidasRuins = 0;
 
   while (Date.now() < limite && requisicoesFeitas() < opcoes.orcamento) {
     const fila = await lerJogadoresSujos(db, {
@@ -362,19 +407,42 @@ async function rodarFundo(db: Db, opcoes: Opcoes) {
     }
 
     const prontos: string[] = [];
+    let completosNoLote = 0;
+
     for (const j of fila) {
       if (Date.now() > limite || requisicoesFeitas() >= opcoes.orcamento) break;
 
-      await rasparFundo(j.id);
-      prontos.push(j.id);
+      const faltando = await rasparFundo(j.id);
       feitos++;
       if (j.novo) novos++;
+
+      // SÓ sai da fila quem voltou inteiro. Marcar um jogador com metade das
+      // chaves faltando o tiraria da fila para sempre — o espelho ficaria
+      // permanentemente furado, e sem nenhum sinal de que ficou.
+      if (faltando === 0) {
+        prontos.push(j.id);
+        completosNoLote++;
+        seguidasRuins = 0;
+      } else {
+        incompletos++;
+        if (faltando >= CHAVES_POR_JOGADOR / 2) seguidasRuins++;
+      }
 
       log(
         `  ${String(feitos).padStart(5)} ${j.novo ? '+' : '~'} ` +
           `${j.nome.slice(0, 30).padEnd(30)} ${j.ligaCode ?? '--'} ` +
+          `${faltando ? `· ${faltando} chaves faltando` : ''} ` +
           `· ${requisicoesFeitas()} req`,
       );
+
+      if (seguidasRuins >= FALHAS_SEGUIDAS_ATE_DESISTIR) {
+        if (prontos.length) await marcarFundo(db, prontos);
+        throw new Error(
+          `${seguidasRuins} jogadores seguidos voltaram quase vazios — ` +
+            'a origem está recusando as requisições (403/429/queda). ' +
+            'Nada foi tirado da fila; rode de novo quando ela voltar.',
+        );
+      }
 
       // Carimbar de 20 em 20, e não no fim: o Actions pode cortar o job a
       // qualquer momento, e sem isto a próxima execução recomeçaria do zero e
@@ -386,13 +454,16 @@ async function rodarFundo(db: Db, opcoes: Opcoes) {
 
     if (prontos.length) await marcarFundo(db, prontos);
 
-    // A fila voltou cheia mas nada foi processado: só acontece se o orçamento
-    // ou o relógio estouraram no primeiro item. Sair evita laço infinito.
-    if (!prontos.length && feitos === 0) break;
+    // Nenhum jogador do lote saiu da fila: o próximo `lerJogadoresSujos`
+    // devolveria exatamente os mesmos 200 e o laço giraria sem fim. Acontece
+    // quando o orçamento estourou no primeiro item — ou quando todos voltaram
+    // incompletos, que é justamente quando insistir não ajuda.
+    if (completosNoLote === 0) break;
   }
 
   log(
     `\nfundo: ${feitos} jogadores (${novos} pela primeira vez) · ` +
+      `${incompletos} incompletos, mantidos na fila · ` +
       `${requisicoesFeitas()} requisições`,
   );
 }

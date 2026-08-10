@@ -51,9 +51,19 @@ alter table tm_cache add column if not exists hash text;
 alter table tm_cache add column if not exists verificado_em timestamptz not null default now();
 alter table tm_cache add column if not exists estabilidade int not null default 0;
 
--- linhas antigas nunca foram conferidas por hash; herdar a data de gravação é
--- o mais próximo da verdade e evita que a limpeza abaixo as trate como órfãs
-update tm_cache set verificado_em = updated_at where verificado_em < updated_at;
+-- As linhas que já estão na tabela nunca foram conferidas por hash, e para
+-- elas `updated_at` ainda tem o significado antigo: a hora em que foram
+-- gravadas. Herdá-la é o mais próximo da verdade — sem isto o `default now()`
+-- carimbaria uma cópia de trinta dias atrás como recém-conferida, e a página
+-- escreveria "Dados de agora" em cima dela.
+--
+-- O filtro é `hash is null`, e não uma comparação entre as duas datas, porque
+-- esta migração pode ser reaplicada: assim que `tm_cache_gravar` toca a linha
+-- ela ganha hash e para de ser candidata, então rodar de novo não desfaz o
+-- trabalho dela. Uma condição do tipo `verificado_em > updated_at` acertaria
+-- na primeira execução e, na segunda, jogaria para trás justamente as chaves
+-- estáveis — as que mais têm distância entre conferência e alteração.
+update tm_cache set verificado_em = updated_at where hash is null;
 
 
 -- ----------------------------------------------------------------------------
