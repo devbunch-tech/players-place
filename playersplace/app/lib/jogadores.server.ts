@@ -251,27 +251,66 @@ export async function gravarElencoBase(
     : null;
   const agora = new Date().toISOString();
 
-  const linhas = club.players.map((p) => ({
-    id: p.id,
-    nome: p.name,
-    foto: p.photo,
-    numero: p.number,
-    posicao: p.position,
-    nascimento: p.birth,
-    idade: p.age,
-    nacionalidade: p.nationality,
-    valor: p.value,
-    valor_num: euroToMillions(p.value),
-    clube_id: clubeId,
-    clube_nome: club.name,
-    clube_escudo: club.crest,
-    liga_code: ligaCode,
-    liga_nome: ligaNome,
-    atualizado_em: agora,
-  }));
+  // As assinaturas de antes desta passada. Uma consulta de ~28 linhas curtas
+  // para saber quais jogadores realmente se moveram — ver `assinaturaDe`.
+  const anteriores = await lerAssinaturas(db, clubeId);
+
+  const linhas = club.players.map((p) => {
+    const assinatura = assinaturaDe({...p, clubeId});
+    const antes = anteriores.get(p.id);
+    // Jogador novo nesta linha (contratação, ou base ainda vazia) conta como
+    // alterado: ele nunca foi raspado a fundo, ou foi sob outro clube.
+    const mudou = !antes || antes.assinatura !== assinatura;
+    return {
+      id: p.id,
+      nome: p.name,
+      foto: p.photo,
+      numero: p.number,
+      posicao: p.position,
+      nascimento: p.birth,
+      idade: p.age,
+      nacionalidade: p.nationality,
+      valor: p.value,
+      valor_num: euroToMillions(p.value),
+      clube_id: clubeId,
+      clube_nome: club.name,
+      clube_escudo: club.crest,
+      liga_code: ligaCode,
+      liga_nome: ligaNome,
+      atualizado_em: agora,
+      assinatura,
+      alterado_em: mudou ? agora : (antes?.alteradoEm ?? agora),
+      // Preservar o `sujo` antigo quando nada mudou é o ponto todo. Note que
+      // é PRESERVAR, e não escrever `false`: um jogador que a sentinela de
+      // lesões marcou nesta mesma passada, ou que sobrou da fila de ontem,
+      // seria desmarcado sem nunca ter sido raspado. Quem apaga a marca é só
+      // `marcarFundo`, depois de a raspagem ter de fato acontecido.
+      sujo: mudou ? true : (antes?.sujo ?? true),
+    };
+  });
 
   try {
-    const {error} = await db.from(TABELA).upsert(linhas, {onConflict: 'id'});
+    // `fundo_em` fica DE FORA do upsert de propósito: o PostgREST só atualiza
+    // as colunas presentes no payload, e mandá-la aqui zeraria a marca de
+    // raspagem profunda de todo o elenco a cada aquecimento — todos voltariam
+    // à fila todos os dias, que é exatamente o oposto do que se quer.
+    let {error} = await db.from(TABELA).upsert(linhas, {onConflict: 'id'});
+
+    // `assinatura`, `sujo` e `alterado_em` são da migração 006. Antes dela o
+    // PostgREST recusa o upsert inteiro por causa das colunas desconhecidas, e
+    // a base — que é o que segura a página do clube quando a origem cai —
+    // pararia de ser escrita sem nenhum sinal. Aqui a passada vira a de antes:
+    // sem sentinela, mas gravando.
+    if (error) {
+      const semSentinela = linhas.map((l) => {
+        const copia: Record<string, unknown> = {...l};
+        for (const c of ['assinatura', 'sujo', 'alterado_em']) delete copia[c];
+        return copia;
+      });
+      ({error} = await db
+        .from(TABELA)
+        .upsert(semSentinela, {onConflict: 'id'}));
+    }
     if (error) return 0;
 
     await db
@@ -285,6 +324,172 @@ export async function gravarElencoBase(
     // a base é acessório: falhar aqui só significa que a próxima visita raspa
     return 0;
   }
+}
+
+// ---------------------------------------------------------------------------
+// A SENTINELA
+//
+// O espelho tem ~9 chaves por jogador (ficha, carreira, jogos, desempenho,
+// valor de mercado, seleção, lesões, transferências, rumores). Nas 24 ligas
+// cobertas isso dá da ordem de 120 mil chaves — re-raspar tudo todo dia são
+// ~33 h de requisições contínuas ao Transfermarkt, o que não é aceitável nem
+// para eles nem para nós.
+//
+// A saída é que a página de elenco de um clube JÁ PUBLICA, numa única
+// requisição, o nome, o número, a posição, o clube e o valor de mercado de
+// todos os ~28 jogadores. Se nenhum desses campos mudou, é altíssima a chance
+// de que nada relevante mudou no jogador. Então 480 requisições (uma por
+// clube) elegem, por noite, as poucas dezenas de jogadores que valem a
+// re-raspagem completa.
+//
+// A sentinela é uma heurística, e assumidamente: ela não vê um jogo disputado
+// que só mexeu no histórico. Por isso ela não trabalha sozinha — o job também
+// marca como sujo o elenco de todo clube que jogou desde a última passada, e
+// a validade adaptativa de `tm_cache_gravar` cobre o resto sozinha.
+// ---------------------------------------------------------------------------
+
+/**
+ * O que a sentinela observa: os campos que o elenco do clube publica de graça.
+ *
+ * Texto puro em vez de hash de propósito — cabe em 60 caracteres, some do
+ * custo de banco e, quando algo estranho acontece, dá para abrir a linha no
+ * SQL Editor e enxergar o que mudou sem decodificar nada.
+ */
+function assinaturaDe(p: {
+  name: string;
+  number: string;
+  position: string;
+  value: string;
+  clubeId: string;
+}): string {
+  return [p.name, p.number, p.position, p.value, p.clubeId].join('|');
+}
+
+interface Anterior {
+  assinatura: string | null;
+  alteradoEm: string;
+  sujo: boolean;
+}
+
+async function lerAssinaturas(
+  db: Db,
+  clubeId: string,
+): Promise<Map<string, Anterior>> {
+  const mapa = new Map<string, Anterior>();
+  try {
+    const {data, error} = await db
+      .from(TABELA)
+      .select('id, assinatura, alterado_em, sujo')
+      .eq('clube_id', clubeId);
+    if (error || !data) return mapa;
+    for (const l of data as ({id: string; alterado_em: string} & Omit<
+      Anterior,
+      'alteradoEm'
+    >)[]) {
+      mapa.set(l.id, {
+        assinatura: l.assinatura,
+        alteradoEm: l.alterado_em,
+        sujo: l.sujo,
+      });
+    }
+  } catch {
+    // sem as assinaturas antigas todo mundo conta como alterado: o job da
+    // noite fica mais caro uma vez, e nada fica desatualizado
+  }
+  return mapa;
+}
+
+/** um jogador na fila de raspagem profunda */
+export interface JogadorSujo {
+  id: string;
+  nome: string;
+  ligaCode: string | null;
+  /** true quando nunca foi raspado a fundo (backfill), false quando é update */
+  novo: boolean;
+}
+
+/**
+ * Quem precisa ser raspado a fundo, na ordem certa.
+ *
+ * A ordenação por `fundo_em nulls first` é o que faz o backfill inicial e a
+ * atualização diária serem O MESMO job: enquanto houver jogador nunca raspado
+ * ele tem prioridade, e quando a base fica completa a fila naturalmente passa
+ * a conter só os que a sentinela marcou. Não há um "modo backfill" para ligar
+ * e desligar — e é por isso que o job pode ser cortado a qualquer momento sem
+ * que nada precise ser recomeçado.
+ *
+ * Lança em caso de erro, ao contrário do resto deste módulo: aqui quem chama é
+ * um job, e uma fila que voltou vazia porque o banco recusou a consulta seria
+ * lida como "está tudo em dia" — o pior desfecho possível.
+ */
+export async function lerJogadoresSujos(
+  db: Db,
+  opcoes: {ligas?: string[]; limite: number},
+): Promise<JogadorSujo[]> {
+  let q = db
+    .from(TABELA)
+    .select('id, nome, liga_code, fundo_em')
+    .eq('sujo', true)
+    .order('fundo_em', {ascending: true, nullsFirst: true})
+    .limit(opcoes.limite);
+
+  if (opcoes.ligas?.length) q = q.in('liga_code', opcoes.ligas);
+
+  const {data, error} = await q;
+  if (error) throw new Error(`fila de jogadores: ${error.message}`);
+
+  return (data ?? [])
+    .map(
+      (l) =>
+        l as {
+          id: string;
+          nome: string;
+          liga_code: string | null;
+          fundo_em: string | null;
+        },
+    )
+    .map((l) => ({
+      id: l.id,
+      nome: l.nome,
+      ligaCode: l.liga_code,
+      novo: !l.fundo_em,
+    }));
+}
+
+/**
+ * Tira da fila os jogadores cuja raspagem profunda terminou.
+ *
+ * É o ÚNICO lugar que apaga a marca `sujo`, e isso é deliberado: enquanto a
+ * raspagem não acontece de fato, nada pode dizer que ela aconteceu.
+ */
+export async function marcarFundo(db: Db, ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  const {error} = await db
+    .from(TABELA)
+    .update({fundo_em: new Date().toISOString(), sujo: false})
+    .in('id', ids);
+  if (error) throw new Error(`marcar fundo: ${error.message}`);
+}
+
+/**
+ * Empurra jogadores para a fila mesmo sem mudança de assinatura.
+ *
+ * É por aqui que entram os sinais que o elenco não mostra: o clube entrou em
+ * campo (mudou histórico de jogos e desempenho) ou apareceu na lista de
+ * lesionados e suspensos. Sem isto, um jogador que joga toda quarta e domingo
+ * sem mudar de valor nem de número ficaria congelado no espelho.
+ */
+export async function marcarSujos(db: Db, ids: string[]): Promise<number> {
+  if (!ids.length) return 0;
+  const {error, count} = await db
+    .from(TABELA)
+    .update(
+      {sujo: true, alterado_em: new Date().toISOString()},
+      {count: 'exact'},
+    )
+    .in('id', ids);
+  if (error) throw new Error(`marcar sujos: ${error.message}`);
+  return count ?? 0;
 }
 
 export interface ResumoExecucao {

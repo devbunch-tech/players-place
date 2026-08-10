@@ -78,6 +78,57 @@ o Apertura do 1º semestre).
 4. Deploy na Oxygen: `npx shopify hydrogen deploy` (definir `SESSION_SECRET`
    e vincular a storefront no painel Hydrogen).
 
+## Espelho do Transfermarkt
+
+O site não depende mais de o Transfermarkt estar de pé. Tudo o que ele sabe
+exibir fica gravado no Supabase, e a raspagem serve só para **atualizar** —
+não para a página existir.
+
+**As peças**
+
+| Onde | O que faz |
+| --- | --- |
+| `supabase/006_espelho.sql` | Detecção de mudança por conteúdo (`hash`) e a fila de jogadores (`sujo`) |
+| `scripts/espelho.ts` | O job que enche e mantém o banco (roda em Node, fora do Oxygen) |
+| `.github/workflows/espelho.yml` | Dispara o job todo dia às 03:00 BRT |
+
+**Como ele evita re-raspar 120 mil chaves por dia**
+
+1. O modo `raso` percorre as 24 competições e todos os clubes. A página de
+   elenco publica, numa requisição só, nome, número, posição, valor e clube dos
+   ~28 jogadores — comparar isso com a passada anterior revela de graça quem se
+   mexeu. Somam-se dois sinais que o elenco não mostra: quem está no
+   departamento médico, e se o clube entrou em campo desde ontem.
+2. O modo `fundo` raspa as ~9 chaves pesadas **só dos marcados**.
+3. Em cada gravação, `tm_cache_gravar` compara o hash do conteúdo. Se nada
+   mudou, o payload não é reescrito e a validade lógica da chave **dobra**, até
+   o teto de 7 dias. Uma carreira encerrada deixa de ser buscada sozinha; um
+   histórico de jogos que muda toda quarta volta ao TTL curto sozinho. Ninguém
+   ajusta TTL na mão.
+
+Requisição condicional não ajudaria: medido em 10/08/2026, o `Last-Modified` do
+Transfermarkt é a hora de renderização, e com conteúdo idêntico ele avança a
+cada 60 s — o `If-Modified-Since` volta 200, nunca 304.
+
+**Colocar para funcionar**
+
+1. Rodar `supabase/006_espelho.sql` no SQL Editor (é idempotente).
+2. Cadastrar `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` nos *secrets* do
+   repositório no GitHub.
+3. O primeiro carregamento são ~130 mil requisições: com o orçamento padrão
+   leva cerca de uma semana de execuções noturnas. Para acelerar, dispare pela
+   aba Actions com `orcamento` maior (o teto útil é ~50000, as 6 h do runner).
+   A fila é retomável — cada jogador é carimbado assim que termina.
+
+Localmente:
+
+```bash
+npm run espelho -- raso  --ligas=BRA1
+npm run espelho -- fundo --ligas=BRA1 --orcamento=500
+```
+
+O progresso se lê no SQL Editor — as consultas estão no rodapé da migração.
+
 ## Avisos
 
 - Os dados são obtidos do Transfermarkt **sem afiliação oficial**, por

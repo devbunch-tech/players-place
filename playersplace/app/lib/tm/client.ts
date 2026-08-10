@@ -135,11 +135,49 @@ const TABELA = 'tm_cache';
 const NAO_PERSISTIR = /^search:/;
 
 /**
- * Teto do que aceitamos gravar. O histórico de jogos de um veterano passa
- * folgado de 100 KB; acima deste limite a linha custa mais em banco do que
- * rende em disponibilidade, e a página continua servida pelos L1/L2.
+ * Teto do que aceitamos gravar.
+ *
+ * Era 512 KB, o que descartava em silêncio exatamente as chaves mais caras de
+ * reconstruir — o histórico de jogos de um veterano passa folgado disso. Num
+ * cache isso era aceitável (os L1/L2 seguravam a página); num ESPELHO não é: a
+ * chave que não está no banco é a chave que devolve 502 quando a origem cai.
+ *
+ * 2 MB de JSON viram algo entre 200 e 400 KB em disco, porque o `jsonb` do
+ * Postgres é comprimido (TOAST) e este payload é altamente repetitivo.
  */
-const MAX_PAYLOAD = 512 * 1024;
+const MAX_PAYLOAD = 2 * 1024 * 1024;
+
+/**
+ * SHA-256 do valor serializado — é ele que responde "mudou alguma coisa?".
+ *
+ * POR QUE COMPARAR CONTEÚDO, E NÃO PERGUNTAR À ORIGEM: medido em 10/08/2026, o
+ * `Last-Modified` do Transfermarkt é a hora de RENDERIZAÇÃO da página, não a da
+ * última alteração. Com o conteúdo idêntico, 100 s depois ele já tinha pulado
+ * de 14:23:00 para 14:25:00 (o TTL de 60 s do CloudFront na frente deles) e o
+ * `If-Modified-Since` voltou 200, não 304. Requisição condicional não economiza
+ * nada aqui; comparar o que já foi baixado, sim.
+ *
+ * `JSON.stringify` é estável para o que passa por aqui: os parsers montam os
+ * objetos sempre na mesma ordem de campos, então chaves iguais geram bytes
+ * iguais. Um falso "mudou" custaria uma regravação, não um erro.
+ */
+async function hashDoValor(valor: unknown): Promise<string> {
+  const bytes = new TextEncoder().encode(JSON.stringify(valor ?? null));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+/**
+ * Teto da validade adaptativa — ver `tm_cache_gravar` em `006_espelho.sql`.
+ *
+ * Cada conferência que não acha diferença dobra a validade lógica da chave, e
+ * este é o limite: uma semana. Ele existe para que nenhuma chave saia do
+ * radar de vez, mesmo que o conteúdo dela tenha ficado congelado por engano
+ * nosso (parser quebrado devolvendo sempre a mesma estrutura, por exemplo).
+ */
+const TETO_VALIDADE = 7 * 24 * 3600;
 
 interface DoBanco<T> {
   valor: T;
@@ -150,57 +188,101 @@ interface DoBanco<T> {
 async function lerDoBanco<T>(chave: string): Promise<DoBanco<T> | null> {
   if (!dbAtual || NAO_PERSISTIR.test(chave)) return null;
   try {
-    const {data, error} = await dbAtual
-      .from(TABELA)
-      .select('payload, fresco_ate, updated_at')
-      .eq('chave', chave)
-      .maybeSingle();
+    // `verificado_em` é da migração 006; enquanto ela não for aplicada, o
+    // PostgREST recusa a coluna e derruba o SELECT inteiro. Sem esta volta o
+    // L3 pararia de ser LIDO, que é o mesmo que não existir — e só se notaria
+    // na próxima queda do Transfermarkt.
+    const ler = (colunas: string) =>
+      dbAtual!.from(TABELA).select(colunas).eq('chave', chave).maybeSingle();
+
+    let {data, error} = await ler('payload, fresco_ate, verificado_em');
+    if (error) ({data, error} = await ler('payload, fresco_ate, updated_at'));
     if (error || !data) return null;
 
-    const salvoEm = Date.parse(data.updated_at);
-    const frescoAte = Date.parse(data.fresco_ate);
+    const linha = data as unknown as {
+      payload: {v: T};
+      fresco_ate: string;
+      verificado_em?: string;
+      updated_at?: string;
+    };
+
+    // `verificado_em`, e NÃO `updated_at`: desde a migração 006 o `updated_at`
+    // é a data da última MUDANÇA de conteúdo, e a página usa isto para escrever
+    // "Dados de …". A carreira de um aposentado não muda há dois anos e está
+    // perfeitamente atual — carimbá-la com 2024 assustaria o visitante à toa.
+    // O que ele quer saber é quando conferimos pela última vez.
+    const salvoEm = Date.parse(linha.verificado_em ?? linha.updated_at ?? '');
+    const frescoAte = Date.parse(linha.fresco_ate);
     if (Number.isNaN(salvoEm) || Number.isNaN(frescoAte)) return null;
 
     // o valor vem embrulhado em {v: …} porque `payload` é NOT NULL e várias
     // consultas legitimamente devolvem `null` (getPlayerCareer, getPlayerGameLog)
-    return {valor: (data.payload as {v: T}).v, salvoEm, frescoAte};
+    return {valor: linha.payload.v, salvoEm, frescoAte};
   } catch {
     return null;
   }
 }
 
+/**
+ * Grava no L3 comparando conteúdo, e devolve se algo mudou de fato.
+ *
+ * Quem decide é a função `tm_cache_gravar` no Postgres, numa ida só: hash
+ * igual ao que está lá significa não reescrever o payload (uma chave estável de
+ * 300 KB seria regravada inteira toda noite à toa), não mexer no `updated_at`
+ * — que passa a ser a data da última mudança DE VERDADE, e é isso que a página
+ * quer dizer em "Dados de …" — e dobrar a validade lógica da chave.
+ *
+ * `null` quando não deu para saber (banco desligado, payload grande demais,
+ * erro): quem chama trata como "não sei", nunca como "não mudou".
+ */
 async function gravarNoBanco(
   chave: string,
   ttlSeconds: number,
   valor: unknown,
-  salvoEm: number,
-): Promise<void> {
-  if (!dbAtual || NAO_PERSISTIR.test(chave)) return;
+): Promise<boolean | null> {
+  if (!dbAtual || NAO_PERSISTIR.test(chave)) return null;
   try {
-    if (JSON.stringify(valor ?? null).length > MAX_PAYLOAD) return;
-    await dbAtual.from(TABELA).upsert(
-      {
-        chave,
-        payload: {v: valor ?? null},
-        fresco_ate: new Date(salvoEm + ttlSeconds * 1000).toISOString(),
-        updated_at: new Date(salvoEm).toISOString(),
-      },
-      {onConflict: 'chave'},
-    );
+    if (JSON.stringify(valor ?? null).length > MAX_PAYLOAD) return null;
+
+    const {data, error} = await dbAtual.rpc('tm_cache_gravar', {
+      p_chave: chave,
+      p_payload: {v: valor ?? null},
+      p_hash: await hashDoValor(valor),
+      p_ttl_s: Math.round(ttlSeconds),
+      p_teto_s: TETO_VALIDADE,
+    });
+
+    // A função é da migração 006. Enquanto ela não for aplicada — ou nos
+    // minutos em que o PostgREST ainda está com o schema velho em cache — a
+    // chamada falha, e sem esta volta o L3 pararia de ser gravado INTEIRO: a
+    // camada que existe justamente para o site sobreviver à queda da origem
+    // sumiria em silêncio, e só se notaria na próxima queda. O upsert antigo
+    // não sabe comparar conteúdo, mas grava — que é o que não pode faltar.
+    if (error) {
+      await dbAtual.from(TABELA).upsert(
+        {
+          chave,
+          payload: {v: valor ?? null},
+          fresco_ate: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+        {onConflict: 'chave'},
+      );
+      return null;
+    }
+
+    // `returns table` chega como array de uma linha
+    const linha = Array.isArray(data) ? data[0] : data;
+    return (linha as {mudou_out?: boolean} | null)?.mudou_out ?? null;
   } catch {
     // gravar no cache nunca pode derrubar a resposta
+    return null;
   }
 }
 
 /** grava no L3 sem segurar a resposta */
-function persistir(
-  chave: string,
-  ttlSeconds: number,
-  valor: unknown,
-  salvoEm: number,
-): void {
-  const tarefa = gravarNoBanco(chave, ttlSeconds, valor, salvoEm);
-  waitUntilAtual?.(tarefa);
+function persistir(chave: string, ttlSeconds: number, valor: unknown): void {
+  waitUntilAtual?.(gravarNoBanco(chave, ttlSeconds, valor));
 }
 
 /**
@@ -304,7 +386,7 @@ function revalidarEmSegundoPlano<T>(
       remember(key, ttlSeconds, value, agora);
       if (value !== undefined) {
         if (cache) await guardar(cache, key, ttlSeconds, value, agora);
-        await gravarNoBanco(key, ttlSeconds, value, agora);
+        await gravarNoBanco(key, ttlSeconds, value);
       }
     } catch {
       // origem fora do ar: a cópia velha continua servindo, que é o objetivo
@@ -371,6 +453,22 @@ export async function cachedRegistro<T>(
   ttlSeconds: number,
   fn: () => Promise<T>,
 ): Promise<Registro<T>> {
+  // o job de espelho reusa os getters das páginas, mas precisa do caminho da
+  // origem — ver `ativarModoEspelho`
+  if (modoEspelho) {
+    // o L1 continua valendo, e isso importa: `perf`, `career` e `starts` são
+    // três getters montados em cima da MESMA chave `perfraw:`. Ignorar a
+    // memória aqui compraria o mesmo JSON três vezes por jogador — 30% de
+    // requisições a mais, cobradas de um terceiro, sem nenhum ganho
+    const hit = memory.get(key);
+    if (hit && hit.exp > Date.now()) {
+      return {valor: hit.value as T, salvoEm: hit.salvoEm, fresco: true};
+    }
+    const agora = Date.now();
+    const {valor} = await renovarRegistro(key, ttlSeconds, fn);
+    return {valor, salvoEm: agora, fresco: true};
+  }
+
   const hit = memory.get(key);
   if (hit && hit.exp > Date.now()) {
     return {valor: hit.value as T, salvoEm: hit.salvoEm, fresco: true};
@@ -431,7 +529,7 @@ export async function cachedRegistro<T>(
   if (value !== undefined) {
     remember(key, ttlSeconds, value, agora);
     if (cache) await guardar(cache, key, ttlSeconds, value, agora);
-    persistir(key, ttlSeconds, value, agora);
+    persistir(key, ttlSeconds, value);
   }
 
   return {valor: value, salvoEm: agora, fresco: true};
@@ -466,17 +564,57 @@ export async function renovar<T>(
   ttlSeconds: number,
   fn: () => Promise<T>,
 ): Promise<T> {
+  const {valor} = await renovarRegistro(key, ttlSeconds, fn);
+  return valor;
+}
+
+/** o que `renovar()` descobriu, para o job noturno poder relatar */
+export interface Renovacao<T> {
+  valor: T;
+  /** true quando o conteúdo mudou; null quando não deu para saber */
+  mudou: boolean | null;
+}
+
+/** o mesmo que `renovar()`, dizendo se o conteúdo mudou de fato */
+export async function renovarRegistro<T>(
+  key: string,
+  ttlSeconds: number,
+  fn: () => Promise<T>,
+): Promise<Renovacao<T>> {
   const agora = Date.now();
   const value = await fn();
 
-  if (value !== undefined) {
-    remember(key, ttlSeconds, value, agora);
-    const cache = await openCache();
-    if (cache) await guardar(cache, key, ttlSeconds, value, agora);
-    await gravarNoBanco(key, ttlSeconds, value, agora);
-  }
+  if (value === undefined) return {valor: value, mudou: null};
 
-  return value;
+  remember(key, ttlSeconds, value, agora);
+  const cache = await openCache();
+  if (cache) await guardar(cache, key, ttlSeconds, value, agora);
+  return {valor: value, mudou: await gravarNoBanco(key, ttlSeconds, value)};
+}
+
+/**
+ * MODO ESPELHO — desliga a leitura de cache, ligado só pelo job de espelho.
+ *
+ * O job (`scripts/espelho.ts`) chama os MESMOS getters de `index.ts` que as
+ * páginas chamam, porque duplicar as duas dezenas de raspagens numa segunda
+ * implementação seria garantir que elas divirjam. Só que os getters usam
+ * `cached()`, e `cached()` com cópia fresca no banco devolve a cópia sem ir à
+ * origem — o job não atualizaria nada, apenas leria de volta o que ele mesmo
+ * gravou ontem.
+ *
+ * Com a chave ligada, `cached()`/`cachedRegistro()` passam a se comportar como
+ * `renovar()`: sempre origem, sempre gravação com comparação de conteúdo. É um
+ * booleano de módulo em vez de um parâmetro em vinte assinaturas porque o
+ * processo do job é dedicado — ele liga isto na primeira linha e nunca
+ * desliga, e nada mais roda dentro dele.
+ *
+ * NUNCA deve ser ligado no Worker: uma requisição de visitante com isto ligado
+ * perderia as três camadas de cache de uma vez.
+ */
+let modoEspelho = false;
+
+export function ativarModoEspelho(): void {
+  modoEspelho = true;
 }
 
 /**
@@ -527,6 +665,56 @@ function registrarAcerto(): void {
   abertoAte = 0;
 }
 
+/**
+ * Ritmo mínimo entre duas requisições à origem, e o contador delas.
+ *
+ * Zero por padrão: no Worker cada requisição de visitante dispara poucas
+ * raspagens e atrasá-las só pioraria o TTFB de quem está esperando. Quem liga
+ * isto é o job de espelho (`scripts/espelho.ts`), que é a única parte do
+ * sistema que consulta o Transfermarkt em rajada de milhares — ali o ritmo
+ * precisa ficar no nível de um humano navegando rápido, e o contador é o que
+ * permite ao job parar dentro de um orçamento em vez de "até acabar".
+ *
+ * Fica aqui, no ponto por onde TODA requisição à origem passa, e não espalhado
+ * em pausas dentro do job: assim uma chamada nova em `index.ts` já nasce sob
+ * o mesmo ritmo, sem ninguém precisar lembrar disso.
+ */
+let intervaloMinimo = 0;
+let ultimaRequisicao = 0;
+let requisicoes = 0;
+
+export function definirRitmo(ms: number): void {
+  intervaloMinimo = Math.max(0, ms);
+}
+
+/**
+ * Fila de um só, para o ritmo valer também quando as chamadas são paralelas.
+ *
+ * Vários getters de `index.ts` disparam `Promise.all` (a briefing de uma
+ * partida, as estatísticas de uma liga). Sem esta serialização todas leriam o
+ * mesmo `ultimaRequisicao`, calculariam a mesma espera e sairiam JUNTAS depois
+ * dela — o intervalo viraria decoração e a rajada continuaria de pé.
+ */
+let filaRitmo: Promise<void> = Promise.resolve();
+
+function aguardarVez(): Promise<void> {
+  if (intervaloMinimo <= 0) return Promise.resolve();
+  const minha = filaRitmo.then(async () => {
+    const espera = ultimaRequisicao + intervaloMinimo - Date.now();
+    if (espera > 0) await new Promise((r) => setTimeout(r, espera));
+    ultimaRequisicao = Date.now();
+  });
+  // a fila nunca pode ficar rejeitada, ou toda requisição seguinte herdaria o
+  // erro de uma anterior que não tinha nada a ver com ela
+  filaRitmo = minha.catch(() => {});
+  return minha;
+}
+
+/** quantas requisições à origem este processo já fez */
+export function requisicoesFeitas(): number {
+  return requisicoes;
+}
+
 /** o fetch da origem com o disjuntor em volta, comum aos dois hosts */
 async function comDisjuntor(
   entrada: string,
@@ -535,6 +723,9 @@ async function comDisjuntor(
   if (Date.now() < abertoAte) {
     throw new OrigemIndisponivel('disjuntor aberto');
   }
+
+  await aguardarVez();
+  requisicoes++;
 
   let res: Response;
   try {

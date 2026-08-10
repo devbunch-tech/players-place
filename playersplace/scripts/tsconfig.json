@@ -1,0 +1,14 @@
+{
+  // O job de espelho é o único código do repositório que roda em Node, e não
+  // no Oxygen. Ele precisa dos globais do Node (`process`) E dos tipos de
+  // Worker, porque importa `app/lib/tm/client.ts` — que fala em `Cache`,
+  // `Response` e `RequestInit`. Por isso um tsconfig próprio, com os dois
+  // conjuntos: colocar `node` no tsconfig da raiz contaminaria o bundle do
+  // site com tipos que lá não existem.
+  "extends": "../tsconfig.json",
+  "include": ["./**/*.ts", "../app/**/*.ts", "../env.d.ts"],
+  "compilerOptions": {
+    "types": ["@shopify/oxygen-workers-types", "node"],
+    "noEmit": true
+  }
+}

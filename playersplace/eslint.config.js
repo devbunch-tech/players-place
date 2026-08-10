@@ -153,7 +153,10 @@ export default [
     languageOptions: {
       parser: tsParser,
       parserOptions: {
-        project: './tsconfig.json',
+        // `scripts/` tem tsconfig próprio (roda em Node, não no Oxygen) e não
+        // entra no include da raiz; sem listá-lo aqui o parser recusa os
+        // arquivos de lá com "file was not found in any of the projects"
+        project: ['./tsconfig.json', './scripts/tsconfig.json'],
         tsconfigRootDir: __dirname,
         ecmaFeatures: {
           jsx: true,

@@ -1,0 +1,109 @@
+# Espelho do Transfermarkt — enche e mantém o banco.
+#
+# POR QUE ESTE JOB EXISTE, JÁ HAVENDO O aquecer-cache.yml
+#
+# O aquecer-cache visita páginas do site. Isso aquece os caches e grava no
+# banco as chaves DAQUELAS páginas — mas nenhuma delas é uma página de jogador.
+# Resultado: quando o Transfermarkt saía do ar, /jogadores/:id devolvia 502
+# porque a chave nunca tinha sido gravada.
+#
+# Aqui a lógica é outra: um processo Node percorre as 24 competições, todos os
+# clubes e todos os jogadores, e escreve direto no Supabase. Depois disto o
+# banco deixa de ser cache do que foi visitado e passa a ser ESPELHO — a
+# raspagem vira atualização, não pré-requisito para a página existir.
+#
+# COMO ELE NÃO MARTELA A ORIGEM
+#
+# `app/lib/tm/client.ts` serializa TODA requisição ao Transfermarkt num
+# intervalo mínimo (400 ms). O job não decide ritmo — ele só recebe um
+# orçamento de requisições e para quando acaba. É por isso que a conta abaixo
+# é em requisições, e não em jogadores.
+#
+# O PRIMEIRO CARREGAMENTO
+#
+# São ~130 mil requisições para cobrir tudo a fundo. Com o orçamento padrão
+# isso leva cerca de uma semana de execuções noturnas, e a fila é retomável:
+# cada jogador é carimbado assim que termina, então um job cortado no meio
+# continua exatamente de onde parou. Para acelerar, dispare manualmente pela
+# aba Actions com um orçamento maior — o teto útil é ~50000 (as 6 h do runner).
+name: espelho
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # 06:00 UTC = 03:00 BRT, antes do aquecimento de páginas
+  workflow_dispatch:
+    inputs:
+      modo:
+        description: 'raso (sentinela) · fundo (jogadores) · ambos'
+        type: choice
+        options: [ambos, raso, fundo]
+        default: ambos
+      orcamento:
+        description: 'teto de requisições ao Transfermarkt no modo fundo'
+        default: '20000'
+      ligas:
+        description: 'códigos separados por vírgula; vazio = todas'
+        default: ''
+
+# Duas execuções ao mesmo tempo dobrariam o ritmo na origem — que é a única
+# coisa que este job não pode fazer. Sem `cancel-in-progress`: a que já está
+# rodando é a que tem contexto, e a fila é retomável de qualquer forma.
+concurrency:
+  group: espelho
+  cancel-in-progress: false
+
+jobs:
+  espelho:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    defaults:
+      run:
+        working-directory: playersplace
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      MODO: ${{ inputs.modo || 'ambos' }}
+      ORCAMENTO: ${{ inputs.orcamento || '20000' }}
+      LIGAS: ${{ inputs.ligas || '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: playersplace/package-lock.json
+
+      - run: npm ci
+
+      # Sem as credenciais o job não tem o que fazer, e falhar aqui é melhor do
+      # que rodar 20 mil requisições ao Transfermarkt para descartar tudo.
+      - name: Confere as credenciais
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
+            echo "::error::cadastre SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY nos secrets do repositório"
+            exit 1
+          fi
+
+      # A sentinela: uma passada por competição, clube e elenco. É ela que
+      # decide QUEM mudou — e ela roda antes por isso mesmo, para o passo
+      # seguinte já encontrar a fila do dia montada.
+      #
+      # ~480 clubes × 5 requisições ≈ 2400, uns 20 minutos no ritmo de 400 ms.
+      - name: Sentinela (raso)
+        if: env.MODO == 'ambos' || env.MODO == 'raso'
+        run: |
+          npm run espelho -- raso \
+            --orcamento=6000 --minutos=90 \
+            ${LIGAS:+--ligas=$LIGAS}
+
+      # A raspagem profunda: as ~9 chaves de cada jogador da fila. Enquanto
+      # houver jogador nunca raspado ele tem prioridade (é o backfill inicial);
+      # depois disso a fila contém só quem a sentinela marcou.
+      - name: Jogadores (fundo)
+        if: env.MODO == 'ambos' || env.MODO == 'fundo'
+        run: |
+          npm run espelho -- fundo \
+            --orcamento=$ORCAMENTO --minutos=240 \
+            ${LIGAS:+--ligas=$LIGAS}
