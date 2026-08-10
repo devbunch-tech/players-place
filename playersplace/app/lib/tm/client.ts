@@ -128,6 +128,131 @@ export function registrarDb(db: Db | null): void {
 /** tabela do L3 — ver `supabase/004_cache_duravel.sql` */
 const TABELA = 'tm_cache';
 
+// ---------------------------------------------------------------------------
+// Dicionário de nomes de clubes e competições
+// ---------------------------------------------------------------------------
+
+/**
+ * POR QUE EXISTE
+ *
+ * Cinco painéis da página do jogador (desempenho, carreira, titularidades,
+ * seleção, jogos) só têm o ID numérico do clube e da competição no JSON de
+ * origem; o nome vem de uma SEGUNDA chamada, a `/clubs?ids[]=`, que é da API
+ * `tmapi.transfermarkt.technology`.
+ *
+ * Quando essa chamada falha — e ela falha exatamente quando tudo mais falha, o
+ * 403 do WAF — o código caía para `names.get(id) ?? id` e a página mostrava
+ * "931", "210", "294" no lugar de Fulham, Grêmio e Benfica. Pior: esse
+ * resultado era gravado nas três camadas como valor legítimo, então o ID
+ * cru sobrevivia à volta da origem, igualzinho ao caso da página de manutenção.
+ *
+ * A resposta é guardar nome por ID, e não por jogador: os ~500 clubes de BRA1 e
+ * BRA2 aparecem na carreira de milhares de jogadores, então uma leitura resolve
+ * o painel de todo mundo. Uma vez sabido, o nome NUNCA mais se perde — não tem
+ * validade, porque clube não é dado que envelhece.
+ *
+ * POR QUE UMA TABELA PRÓPRIA, E NÃO `tm_cache`
+ *
+ * A `tm_cache` é indexada por chave única e serve valores inteiros. Aqui a
+ * consulta é "estes 60 IDs de uma vez", que numa tabela normal é UM `in(...)` e
+ * na `tm_cache` seriam 60 leituras — inviável dentro do teto de subrequisições
+ * do Worker.
+ */
+const TABELA_NOMES = 'tm_nomes';
+
+export type TipoNome = 'clube' | 'competicao';
+
+/**
+ * Nomes já resolvidos neste isolate.
+ *
+ * Sem expiração de propósito: o nome de um clube não muda, e o isolate morre
+ * sozinho em minutos. É o que faz o segundo jogador do mesmo clube não custar
+ * nem consulta ao banco nem requisição à origem.
+ */
+const nomesMemoria = new Map<string, string>();
+const MAX_NOMES = 5000;
+
+const chaveNome = (tipo: TipoNome, id: string) => `${tipo}:${id}`;
+
+/** o que já está na memória do isolate; não toca no banco */
+export function nomesNaMemoria(
+  tipo: TipoNome,
+  ids: string[],
+): Map<string, string> {
+  const achados = new Map<string, string>();
+  for (const id of ids) {
+    const nome = nomesMemoria.get(chaveNome(tipo, id));
+    if (nome) achados.set(id, nome);
+  }
+  return achados;
+}
+
+/**
+ * Os nomes gravados, numa consulta só. Nunca lança: sem dicionário o chamador
+ * cai na origem, que é o comportamento de antes desta tabela existir.
+ */
+export async function nomesSalvos(
+  tipo: TipoNome,
+  ids: string[],
+): Promise<Map<string, string>> {
+  const achados = new Map<string, string>();
+  if (!dbAtual || !ids.length) return achados;
+
+  try {
+    const {data, error} = await dbAtual
+      .from(TABELA_NOMES)
+      .select('id, nome')
+      .eq('tipo', tipo)
+      .in('id', ids);
+    // tabela ausente (migração 007 não aplicada) cai aqui e vira "não sei"
+    if (error || !data) return achados;
+
+    for (const l of data as unknown as {id: string; nome: string}[]) {
+      if (!l.nome) continue;
+      achados.set(l.id, l.nome);
+      lembrarNome(tipo, l.id, l.nome);
+    }
+  } catch {
+    // dicionário indisponível nunca pode derrubar a página
+  }
+  return achados;
+}
+
+function lembrarNome(tipo: TipoNome, id: string, nome: string): void {
+  if (nomesMemoria.size >= MAX_NOMES) {
+    const antigo = nomesMemoria.keys().next().value;
+    if (antigo) nomesMemoria.delete(antigo);
+  }
+  nomesMemoria.set(chaveNome(tipo, id), nome);
+}
+
+/**
+ * Guarda os nomes recém-descobertos, sem segurar a resposta.
+ *
+ * Um upsert só para o lote inteiro. `atualizado_em` existe para dar para
+ * auditar o dicionário, não para expirá-lo.
+ */
+export function guardarNomes(tipo: TipoNome, nomes: Map<string, string>): void {
+  for (const [id, nome] of nomes) lembrarNome(tipo, id, nome);
+  if (!dbAtual || !nomes.size) return;
+
+  const linhas = [...nomes].map(([id, nome]) => ({
+    tipo,
+    id,
+    nome,
+    atualizado_em: new Date().toISOString(),
+  }));
+
+  const db = dbAtual;
+  // embrulhado numa async porque o builder do PostgREST é `PromiseLike`, e não
+  // uma `Promise` de verdade — `emSegundoPlano` precisa do `.catch`
+  emSegundoPlano(
+    (async () => {
+      await db.from(TABELA_NOMES).upsert(linhas, {onConflict: 'tipo,id'});
+    })(),
+  );
+}
+
 /**
  * Buscas não vão para o banco: a cardinalidade é a do teclado do visitante e
  * o valor de ter uma busca antiga salva é nenhum.

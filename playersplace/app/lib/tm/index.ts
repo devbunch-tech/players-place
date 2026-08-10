@@ -5,11 +5,15 @@
 import {
   cached,
   cachedRegistro,
+  guardarNomes,
+  nomesNaMemoria,
+  nomesSalvos,
   renovar,
   tmApiJson,
   tmHtml,
   tmJson,
   type Registro,
+  type TipoNome,
 } from './client';
 import {ehSuspensao, positionMeta} from './positions';
 import {
@@ -622,8 +626,32 @@ export function getPlayerTransfers(id: string): Promise<CeapiTransfer[]> {
     const data = await tmJson<{transfers: CeapiTransfer[]}>(
       `/ceapi/transferHistory/list/${id}`,
     );
-    return data.transfers ?? [];
+    const transfers = data.transfers ?? [];
+    colherNomesDeClube(transfers);
+    return transfers;
   });
+}
+
+/**
+ * O histórico de transferências traz ID e nome de todo clube por onde o jogador
+ * passou — e traz de graça, num JSON que já estamos buscando de qualquer jeito.
+ *
+ * POR QUE ISSO IMPORTA MAIS DO QUE PARECE: é a única fonte de nome de clube
+ * ESTRANGEIRO que não depende da `tmapi`, o host que leva 403. A semente da
+ * `jogadores_base` resolve Grêmio e Coritiba; Fulham, Benfica e Monaco — que
+ * aparecem na carreira dos mesmos jogadores — vêm daqui. Como a raspagem
+ * profunda passa por `ptransfers` de todo mundo da fila, o dicionário cobre a
+ * carreira inteira do elenco de BRA1 e BRA2 sem uma requisição a mais.
+ */
+function colherNomesDeClube(transfers: CeapiTransfer[]): void {
+  const nomes = new Map<string, string>();
+  for (const t of transfers) {
+    for (const lado of [t.from, t.to]) {
+      const clubeId = lado?.href?.match(/\/verein\/(\d+)/)?.[1];
+      if (clubeId && lado.clubName) nomes.set(clubeId, lado.clubName);
+    }
+  }
+  guardarNomes('clube', nomes);
 }
 
 export function getPlayerMarketValueGraph(
@@ -701,13 +729,20 @@ function getRawSeasonPerformance(id: string): Promise<ApiSeasonPerfItem[]> {
   });
 }
 
-/** a URL de `ids[]=` cresce rápido; consultamos em lotes */
+/**
+ * A URL de `ids[]=` cresce rápido; consultamos em lotes.
+ *
+ * `falhou` distingue "a origem disse que não tem" de "não deu para perguntar" —
+ * e essa diferença é a que impede o ID cru de virar nome gravado. Ver
+ * `resolverNomes`.
+ */
 async function fetchInChunks<T>(
   path: string,
   ids: string[],
   size = 60,
-): Promise<T[]> {
-  const out: T[] = [];
+): Promise<{itens: T[]; falhou: boolean}> {
+  const itens: T[] = [];
+  let falhou = false;
   for (let i = 0; i < ids.length; i += size) {
     const qs = ids
       .slice(i, i + size)
@@ -715,12 +750,14 @@ async function fetchInChunks<T>(
       .join('&');
     try {
       const res = await tmApiJson<{data?: T[]}>(`${path}?${qs}`);
-      out.push(...(res.data ?? []));
+      itens.push(...(res.data ?? []));
     } catch {
-      // lote indisponível — seguimos com o que der
+      // lote indisponível — seguimos com o que der, mas o chamador precisa
+      // saber que a lista voltou incompleta por culpa da rede
+      falhou = true;
     }
   }
-  return out;
+  return {itens, falhou};
 }
 
 interface ApiClub {
@@ -729,32 +766,168 @@ interface ApiClub {
   baseDetails?: {shortName?: string; isNationalTeam?: boolean};
 }
 
-/** nomes de clubes/seleções por id */
-async function fetchClubNames(ids: string[]): Promise<Map<string, string>> {
-  const names = new Map<string, string>();
-  if (!ids.length) return names;
-  for (const c of await fetchInChunks<ApiClub>('/clubs', ids)) {
-    names.set(c.id, c.baseDetails?.shortName || c.name);
+/**
+ * Sinaliza que os nomes não puderam ser resolvidos por falha da origem.
+ *
+ * Sobe até `cached()`, que então NÃO grava nada — e as camadas continuam
+ * servindo a cópia boa de antes. É o mesmo remédio da página de manutenção em
+ * `tmHtml`: o pecado não é a origem cair, é gravar o estrago.
+ */
+export class NomesIndisponiveis extends Error {
+  constructor(o: string) {
+    super(`nomes de ${o} indisponíveis: a origem recusou a consulta`);
+    this.name = 'NomesIndisponiveis';
   }
-  return names;
+}
+
+/**
+ * IDs → nomes, passando pelo dicionário antes da origem.
+ *
+ * A ordem é memória do isolate → tabela `tm_nomes` → API. Só o que sobra da
+ * segunda etapa chega na terceira, e o que a terceira descobre volta para o
+ * dicionário — então cada clube custa uma requisição na vida, não uma por
+ * jogador que passou por ele.
+ *
+ * Quando a API falha E sobrou ID sem nome, isto LANÇA em vez de devolver o ID
+ * como se fosse nome. Era o que enchia a tabela "Desempenho por clube" de
+ * números (931, 210, 294) e, pior, congelava esses números no cache pelas 6 h
+ * de validade — muito depois de a origem ter voltado.
+ *
+ * Um ID que a API responde SEM erro mas não conhece (clube extinto, fusão) não
+ * é falha: aí o ID mesmo é o último recurso, e sem exceção nenhuma.
+ */
+async function resolverNomes(
+  tipo: TipoNome,
+  path: string,
+  brutos: string[],
+  extrair: (item: {id: string}) => string,
+): Promise<Map<string, string>> {
+  const ids = [...new Set(brutos.filter(Boolean))];
+  const nomes = nomesNaMemoria(tipo, ids);
+  if (nomes.size === ids.length) return nomes;
+
+  for (const [id, nome] of await nomesSalvos(
+    tipo,
+    ids.filter((i) => !nomes.has(i)),
+  )) {
+    nomes.set(id, nome);
+  }
+
+  const faltando = ids.filter((i) => !nomes.has(i));
+  if (!faltando.length) return nomes;
+
+  const {itens, falhou} = await fetchInChunks<{id: string}>(path, faltando);
+
+  const novos = new Map<string, string>();
+  for (const item of itens) {
+    const nome = extrair(item);
+    if (nome) novos.set(item.id, nome);
+  }
+  guardarNomes(tipo, novos);
+  for (const [id, nome] of novos) nomes.set(id, nome);
+
+  if (falhou && ids.some((i) => !nomes.has(i))) {
+    throw new NomesIndisponiveis(tipo === 'clube' ? 'clubes' : 'competições');
+  }
+  return nomes;
+}
+
+/** nomes de clubes/seleções por id */
+function fetchClubNames(ids: string[]): Promise<Map<string, string>> {
+  return resolverNomes('clube', '/clubs', ids, (c) => {
+    const clube = c as ApiClub;
+    return clube.baseDetails?.shortName || clube.name;
+  });
 }
 
 /** nomes de competições por id */
-async function fetchCompetitionNames(
-  ids: string[],
-): Promise<Map<string, string>> {
-  const names = new Map<string, string>();
-  if (!ids.length) return names;
-  for (const c of await fetchInChunks<{id: string; name: string}>(
+function fetchCompetitionNames(ids: string[]): Promise<Map<string, string>> {
+  return resolverNomes(
+    'competicao',
     '/competitions',
     ids,
-  )) {
-    names.set(c.id, c.name);
-  }
-  return names;
+    (c) => (c as {id: string; name: string}).name,
+  );
 }
 
-export function getPlayerPerformance(id: string): Promise<SeasonPerf[]> {
+/**
+ * Conserta, na LEITURA, os nomes que ficaram como ID no que já está gravado.
+ *
+ * POR QUE NA LEITURA, E NÃO EXPURGANDO AS CHAVES RUINS
+ *
+ * Há linhas no espelho gravadas enquanto `fetchClubNames` devolvia o ID cru na
+ * falha da API — é delas que saiu a tabela "Desempenho por clube" listando 931,
+ * 210 e 294. A saída óbvia seria aposentar essas chaves (trocar `career:` por
+ * `career2:`) e deixar a raspagem repô-las. Só que essas cinco chaves derivam
+ * de `perfraw:`, que vem da `tmapi` — o host que está devolvendo 403. Aposentar
+ * a chave, hoje, não repõe nada: apaga o painel.
+ *
+ * Este caminho é melhor porque não precisa da origem. Os nomes vêm do
+ * dicionário `tm_nomes`, que é alimentado pela raspagem do elenco e pelo
+ * histórico de transferências — ambos em hosts que respondem. Uma consulta
+ * resolve o painel inteiro, e o valor gravado se conserta sozinho na próxima
+ * raspagem completa.
+ *
+ * NUNCA vai à origem: quem chama já está servindo uma resposta, e o reparo é
+ * cosmético demais para custar uma requisição (ou um erro) a mais.
+ */
+async function repararNomes(
+  alvos: {tipo: TipoNome; id: string; aplicar: (nome: string) => void}[],
+): Promise<void> {
+  // `id` como nome é a assinatura exata do bug; qualquer outra coisa é nome de
+  // verdade e não se mexe
+  if (!alvos.length) return;
+
+  for (const tipo of ['clube', 'competicao'] as TipoNome[]) {
+    const doTipo = alvos.filter((a) => a.tipo === tipo);
+    if (!doTipo.length) continue;
+
+    const ids = [...new Set(doTipo.map((a) => a.id))];
+    const nomes = nomesNaMemoria(tipo, ids);
+    const faltando = ids.filter((i) => !nomes.has(i));
+    if (faltando.length) {
+      for (const [id, nome] of await nomesSalvos(tipo, faltando)) {
+        nomes.set(id, nome);
+      }
+    }
+
+    for (const alvo of doTipo) {
+      const nome = nomes.get(alvo.id);
+      if (nome) alvo.aplicar(nome);
+    }
+  }
+}
+
+/** os itens em que o nome ficou igual ao ID — ver `repararNomes` */
+function nomesCrus<T extends {name: string}>(
+  tipo: TipoNome,
+  itens: T[],
+  idDe: (item: T) => string,
+): {tipo: TipoNome; id: string; aplicar: (nome: string) => void}[] {
+  return itens
+    .filter((i) => i.name === idDe(i))
+    .map((i) => ({
+      tipo,
+      id: idDe(i),
+      // muta o objeto de propósito: ele é a própria cópia no cache do isolate,
+      // então o conserto vale para as próximas leituras desta mesma chave
+      aplicar: (nome: string) => {
+        i.name = nome;
+      },
+    }));
+}
+
+export async function getPlayerPerformance(id: string): Promise<SeasonPerf[]> {
+  const seasons = await cachedPerformance(id);
+  await repararNomes(
+    seasons.flatMap((s) =>
+      nomesCrus('competicao', s.rows, (c) => c.competitionId),
+    ),
+  );
+  return seasons;
+}
+
+function cachedPerformance(id: string): Promise<SeasonPerf[]> {
   return cached(`perf:${id}`, 6 * HOUR, async () => {
     const items = await getRawSeasonPerformance(id);
 
@@ -893,7 +1066,20 @@ export function minutesPerGoal(row: CareerTotal): number | null {
  * Totais de toda a carreira somados por competição e por clube —
  * alimenta os blocos "Desempenho por competição" e "Desempenho por clube".
  */
-export function getPlayerCareer(id: string): Promise<PlayerCareer | null> {
+export async function getPlayerCareer(
+  id: string,
+): Promise<PlayerCareer | null> {
+  const career = await cachedCareer(id);
+  if (career) {
+    await repararNomes([
+      ...nomesCrus('competicao', career.competitions, (c) => c.key),
+      ...nomesCrus('clube', career.clubs, (c) => c.key),
+    ]);
+  }
+  return career;
+}
+
+function cachedCareer(id: string): Promise<PlayerCareer | null> {
   return cached(`career:${id}`, 6 * HOUR, async () => {
     const items = await getRawSeasonPerformance(id);
     if (!items.length) return null;
@@ -963,9 +1149,25 @@ export interface SeasonClubStarts {
  * temporada. Uma temporada pode render mais de uma linha quando houve
  * transferência no meio do ano.
  */
-export function getPlayerStartsBySeason(
+export async function getPlayerStartsBySeason(
   id: string,
 ): Promise<SeasonClubStarts[]> {
+  const linhas = await cachedStarts(id);
+  await repararNomes(
+    linhas
+      .filter((l) => l.clubName === l.clubId)
+      .map((l) => ({
+        tipo: 'clube' as const,
+        id: l.clubId,
+        aplicar: (nome: string) => {
+          l.clubName = nome;
+        },
+      })),
+  );
+  return linhas;
+}
+
+function cachedStarts(id: string): Promise<SeasonClubStarts[]> {
   return cached(`starts:${id}`, 6 * HOUR, async () => {
     const items = await getRawSeasonPerformance(id);
     if (!items.length) return [];
@@ -1059,9 +1261,15 @@ const isoToBrShort = (iso: string | null): string | null => {
   return m ? `${m[4]}/${m[3]}/${m[2]}` : null;
 };
 
-export function getPlayerNationalCareer(
+export async function getPlayerNationalCareer(
   id: string,
 ): Promise<NationalTeamRow[]> {
+  const linhas = await cachedNationalCareer(id);
+  await repararNomes(nomesCrus('clube', linhas, (l) => l.clubId));
+  return linhas;
+}
+
+function cachedNationalCareer(id: string): Promise<NationalTeamRow[]> {
   return cached(`nat:${id}`, 6 * HOUR, async () => {
     const res = await tmApiJson<{data?: {history?: ApiNationalCareer[]}}>(
       `/player/${id}/national-career-history`,
@@ -1185,7 +1393,30 @@ const MAX_GAME_SEASONS = 5;
  * Súmula jogo a jogo das últimas temporadas e agregado de posições
  * de toda a carreira — ambos derivados da mesma resposta da API.
  */
-export function getPlayerGameLog(id: string): Promise<PlayerGameLog | null> {
+export async function getPlayerGameLog(
+  id: string,
+): Promise<PlayerGameLog | null> {
+  const log = await cachedGameLog(id);
+  if (log) {
+    const grupos = log.seasons.flatMap((s) => s.groups);
+    await repararNomes([
+      ...nomesCrus('competicao', grupos, (g) => g.competitionId),
+      ...grupos
+        .flatMap((g) => g.rows)
+        .filter((r) => r.opponentName === r.opponentId)
+        .map((r) => ({
+          tipo: 'clube' as const,
+          id: r.opponentId,
+          aplicar: (nome: string) => {
+            r.opponentName = nome;
+          },
+        })),
+    ]);
+  }
+  return log;
+}
+
+function cachedGameLog(id: string): Promise<PlayerGameLog | null> {
   return cached(`games:${id}`, 6 * HOUR, async () => {
     const res = await tmApiJson<{data?: {performance?: ApiGameItem[]}}>(
       `/player/${id}/performance-game`,

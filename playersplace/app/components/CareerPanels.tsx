@@ -130,6 +130,21 @@ function CompetitionCell({id, name}: {id: string; name: string}) {
   );
 }
 
+/**
+ * Último recurso quando o nome do clube não pôde ser resolvido.
+ *
+ * `name === key` significa que sobrou o ID do Transfermarkt no lugar do nome, e
+ * é assim que a tabela chegou a listar "931, 210, 294" em produção. A causa
+ * está resolvida na origem do dado (dicionário `tm_nomes` + a recusa de gravar
+ * ID como nome, em `lib/tm/index.ts`), e o que resta aqui é o caso legítimo e
+ * raro: um clube que a origem responde sem conhecer, tipo agremiação extinta ou
+ * fundida. Nesse caso o número é tudo o que existe — mas ele aparece rotulado,
+ * para ninguém ler um ID achando que é nome.
+ */
+function nomeDeClube(key: string, name: string, rotulo = 'Clube'): string {
+  return name && name !== key ? name : `${rotulo} #${key}`;
+}
+
 /** "Desempenho por clube" — totais da carreira agrupados por clube */
 export function CareerByClub({rows}: {rows: CareerRow[]}) {
   if (!rows.length) return null;
@@ -137,13 +152,16 @@ export function CareerByClub({rows}: {rows: CareerRow[]}) {
     <section className="rounded-card border border-line bg-card p-4">
       <BoxTitle>Desempenho por clube</BoxTitle>
       <MiniTable
-        rows={rows.map((c) => ({
-          key: c.key,
-          icon: <Crest src={clubCrest(c.key)} name={c.name} size={18} />,
-          name: c.name,
-          to: `/clubes/${c.key}`,
-          values: [c.games, c.goals, c.assists],
-        }))}
+        rows={rows.map((c) => {
+          const nome = nomeDeClube(c.key, c.name);
+          return {
+            key: c.key,
+            icon: <Crest src={clubCrest(c.key)} name={nome} size={18} />,
+            name: nome,
+            to: `/clubes/${c.key}`,
+            values: [c.games, c.goals, c.assists],
+          };
+        })}
       />
     </section>
   );
@@ -222,11 +240,15 @@ export function NationalTeamCareer({rows}: {rows: NationalTeamRow[]}) {
               n.current ? '' : 'opacity-80'
             }`}
           >
-            <Crest src={clubCrest(n.clubId)} name={n.name} size={20} />
+            <Crest
+              src={clubCrest(n.clubId)}
+              name={nomeDeClube(n.clubId, n.name, 'Seleção')}
+              size={20}
+            />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-1.5">
                 <span className="truncate text-[13px] font-semibold">
-                  {n.name}
+                  {nomeDeClube(n.clubId, n.name, 'Seleção')}
                 </span>
                 {n.isCaptain ? (
                   <span

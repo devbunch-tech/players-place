@@ -33,6 +33,7 @@
 import type {Db} from '~/lib/db';
 import {euroToMillions, sumValues} from '~/lib/format';
 import {findLeague, type ClubProfile} from '~/lib/tm';
+import {guardarNomes} from '~/lib/tm/client';
 
 const TABELA = 'jogadores_base';
 const TABELA_EXECUCAO = 'jogadores_base_execucao';
@@ -318,6 +319,20 @@ export async function gravarElencoBase(
       .delete()
       .eq('clube_id', clubeId)
       .not('id', 'in', `(${linhas.map((l) => l.id).join(',')})`);
+
+    // Alimenta o dicionário de nomes com o que esta raspagem descobriu.
+    //
+    // Importa QUAL origem é esta: o elenco vem do host de HTML, que continua
+    // respondendo 200 quando a API `tmapi` está devolvendo 403. Então todo
+    // clube e toda competição que passam por aqui ficam resolvidos no
+    // dicionário ANTES de a página do jogador precisar deles — e ela não vai
+    // mais mostrar "210" no lugar de "Grêmio" nem quando a API estiver fora.
+    const nomes = new Map<string, string>();
+    if (club.name) nomes.set(clubeId, club.name);
+    guardarNomes('clube', nomes);
+    if (ligaCode && ligaNome) {
+      guardarNomes('competicao', new Map([[ligaCode, ligaNome]]));
+    }
 
     return linhas.length;
   } catch {

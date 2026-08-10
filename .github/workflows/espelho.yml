@@ -7,23 +7,35 @@
 # Resultado: quando o Transfermarkt saía do ar, /jogadores/:id devolvia 502
 # porque a chave nunca tinha sido gravada.
 #
-# Aqui a lógica é outra: um processo Node percorre as 24 competições, todos os
-# clubes e todos os jogadores, e escreve direto no Supabase. Depois disto o
-# banco deixa de ser cache do que foi visitado e passa a ser ESPELHO — a
-# raspagem vira atualização, não pré-requisito para a página existir.
+# Aqui a lógica é outra: percorrer competições, clubes e jogadores e escrever
+# direto no Supabase. Depois disto o banco deixa de ser cache do que foi
+# visitado e passa a ser ESPELHO — a raspagem vira atualização, não
+# pré-requisito para a página existir.
 #
-# COMO ELE NÃO MARTELA A ORIGEM
+# QUEM RASPA É O OXYGEN, NÃO O RUNNER
 #
-# `app/lib/tm/client.ts` serializa TODA requisição ao Transfermarkt num
-# intervalo mínimo (400 ms). O job não decide ritmo — ele só recebe um
-# orçamento de requisições e para quando acaba. É por isso que a conta abaixo
-# é em requisições, e não em jogadores.
+# Os dois passos abaixo são orquestração: eles chamam endpoints do nosso próprio
+# site e contam o resultado. Nada é raspado a partir do runner do Actions, e
+# isso não é preferência — é a única coisa que funciona.
+#
+# Medido em 10/08/2026: os runners levam 403 do WAF do CloudFront em
+# `tmapi.transfermarkt.technology`, origem de cinco das dez chaves de um
+# jogador. Em 10/08/2026 às 18:54 o bloqueio já alcançava também o host de
+# HTML: a sentinela rodando no runner leu "sem clubes, pulando" nas 24
+# competições, INCLUSIVE BRA1 e BRA2. Como era ela quem enchia a
+# `jogadores_base`, a base parou de ser alimentada; como a fila da raspagem
+# profunda sai da `jogadores_base`, o espelho parou junto. E como a página do
+# jogador devolve 502 quando não acha nem a base nem a chave em cache, o
+# efeito chegou ao visitante: clicar num jogador do Grêmio dava 502.
+#
+# A prova de que é a rede, e não o código: no mesmo minuto em que o runner
+# levava 403, produção gravava as mesmas chaves normalmente. Então o runner
+# ficou só com o papel de relógio e contador.
 #
 # O PRIMEIRO CARREGAMENTO
 #
-# Com o escopo padrão (raso nas 24, fundo em BRA1+BRA2) são ~2.400 requisições
-# de sentinela e ~5.200 de raspagem profunda: fecha na primeira noite, com
-# folga dentro do orçamento.
+# Com o escopo padrão (BRA1+BRA2) são ~200 requisições de sentinela e ~5.200 de
+# raspagem profunda: fecha na primeira noite, com folga dentro do orçamento.
 #
 # A fila é retomável — cada jogador é carimbado assim que termina — então um
 # job cortado no meio continua exatamente de onde parou.
@@ -62,16 +74,22 @@ jobs:
   espelho:
     runs-on: ubuntu-latest
     timeout-minutes: 350
-    defaults:
-      run:
-        working-directory: playersplace
+    # Sem checkout, sem `npm ci`, sem credenciais do Supabase: desde que a
+    # raspagem passou a acontecer no Oxygen, este job não toca em código nem em
+    # banco — ele só chama dois endpoints do site e conta o que voltou. O `node`
+    # que os laços abaixo usam já vem instalado no runner.
     env:
-      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      BASE: ${{ vars.SITE_URL || 'https://www.playersplace.com.br' }}
+      TOKEN: ${{ secrets.ESPELHO_TOKEN || secrets.AQUECIMENTO_TOKEN }}
       MODO: ${{ inputs.modo || 'ambos' }}
       ORCAMENTO: ${{ inputs.orcamento || '20000' }}
-      # `raso` sem filtro = as 24 competições do registro, que é o que se quer.
-      LIGAS_RASO: ${{ inputs.ligas || '' }}
+      # Agora `raso` e `fundo` têm o MESMO escopo padrão, e não é economia: a
+      # sentinela é quem enche a `jogadores_base`, e a `jogadores_base` é quem
+      # monta a fila do `fundo`. Rasar uma liga que o `fundo` não vai aprofundar
+      # produz linha de base sem espelho — que é justamente o estado que devolve
+      # 502 na página do jogador quando a origem cai. Um escopo só, coberto de
+      # ponta a ponta, vale mais que 24 pela metade.
+      LIGAS_RASO: ${{ inputs.ligas || 'BRA1,BRA2' }}
       # `fundo` sem filtro seria outra coisa completamente. Medido em
       # 10/08/2026, a `jogadores_base` tem 125.418 linhas — e só 3.266 delas
       # são das 24 ligas do registro. O resto entrou por visita avulsa a página
@@ -88,56 +106,95 @@ jobs:
       LIGAS_FUNDO: ${{ inputs.ligas || 'BRA1,BRA2' }}
 
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: playersplace/package-lock.json
-
-      - run: npm ci
-
-      # Sem as credenciais o job não tem o que fazer, e falhar aqui é melhor do
-      # que rodar 20 mil requisições ao Transfermarkt para descartar tudo.
-      - name: Confere as credenciais
+      # Sem o token não há como chamar nem um endpoint, e falhar aqui é melhor
+      # do que gastar seis horas de runner para descobrir isso no primeiro POST.
+      - name: Confere o token
         run: |
-          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_SERVICE_ROLE_KEY" ]; then
-            echo "::error::cadastre SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY nos secrets do repositório"
+          if [ -z "$TOKEN" ]; then
+            echo "::error::cadastre ESPELHO_TOKEN (ou AQUECIMENTO_TOKEN) nos secrets do repositório E nas variáveis de ambiente da storefront no Oxygen"
             exit 1
           fi
 
-      # A sentinela: uma passada por competição, clube e elenco. É ela que
-      # decide QUEM mudou — e ela roda antes por isso mesmo, para o passo
-      # seguinte já encontrar a fila do dia montada.
+      # A sentinela: uma passada por competição, clube e elenco, que é o que
+      # enche a `jogadores_base`. Ela roda antes por isso mesmo — é dela que sai
+      # a fila do passo seguinte, e é ela que marca QUEM mudou desde ontem.
       #
-      # ~480 clubes × 5 requisições ≈ 2400, uns 20 minutos no ritmo de 400 ms.
-      - name: Sentinela (raso)
+      # Vinte clubes por competição, ~5 requisições cada: ~200 no total. O
+      # endpoint fatia em lotes porque o Worker tem teto de subrequisições por
+      # requisição, e devolve `proximo` com o índice de onde continuar.
+      - name: Sentinela (raso, pelo Oxygen)
         if: env.MODO == 'ambos' || env.MODO == 'raso'
         run: |
-          npm run espelho -- raso \
-            --orcamento=6000 --minutos=90 \
-            ${LIGAS_RASO:+--ligas=$LIGAS_RASO}
+          node -e "
+            const base = process.env.BASE;
+            const token = process.env.TOKEN;
+            const ligas = (process.env.LIGAS_RASO || 'BRA1,BRA2').split(',').map(s => s.trim()).filter(Boolean);
+            const LOTE = 10;
+
+            (async () => {
+              let falhas = 0;
+
+              for (const liga of ligas) {
+                console.log('=== ' + liga);
+                let inicio = 0, clubes = 0, jogadores = 0;
+
+                // O laço termina de um jeito só: o endpoint devolve
+                // \`proximo: null\` quando chegou no fim da lista de clubes.
+                while (inicio !== null) {
+                  const qs = new URLSearchParams({liga, inicio: String(inicio), limite: String(LOTE)});
+                  const r = await fetch(base + '/api/aquecer?' + qs, {
+                    method: 'POST',
+                    headers: {'x-aquecer-token': token},
+                  }).catch((e) => ({ok: false, status: 0, erro: e.message}));
+
+                  const corpo = r.json ? await r.json().catch(() => ({})) : {};
+
+                  if (!r.ok) {
+                    console.log('::error::' + liga + ': /api/aquecer respondeu ' + (r.status || 'erro de rede') + ' ' + JSON.stringify(corpo));
+                    falhas++;
+                    break;
+                  }
+
+                  clubes += corpo.clubes || 0;
+                  jogadores += corpo.jogadores || 0;
+                  for (const e of (corpo.erros || []).slice(0, 3)) console.log('::warning::' + liga + ': ' + e);
+                  if ((corpo.expurgadas || []).length) console.log('  expurgadas: ' + corpo.expurgadas.join(', '));
+
+                  console.log('  ' + corpo.de + '–' + corpo.ate + ' de ' + corpo.total + ': ' + (corpo.clubes || 0) + ' clubes, ' + (corpo.jogadores || 0) + ' jogadores (' + (corpo.duracaoMs || 0) + 'ms)');
+                  inicio = corpo.proximo;
+
+                  // Cada chamada dispara ~50 requisições à origem de uma vez, e
+                  // o Worker não impõe ritmo — fazer isso lá atrasaria as
+                  // páginas de visitantes reais. Quem espaça é este laço.
+                  if (inicio !== null) await new Promise((s) => setTimeout(s, 2000));
+                }
+
+                console.log(liga + ': ' + clubes + ' clubes, ' + jogadores + ' jogadores na base');
+
+                // Zero clube numa competição que tem vinte significa que a
+                // origem devolveu outra coisa. Não pode passar como sucesso: a
+                // base ficaria velha em silêncio, e o passo seguinte acharia a
+                // fila vazia e diria que 'o espelho está em dia'.
+                if (clubes === 0) {
+                  console.log('::error::' + liga + ': nenhum clube gravado — a origem está recusando as requisições');
+                  falhas++;
+                }
+              }
+
+              if (falhas) process.exit(1);
+            })();
+          "
 
       # A raspagem profunda: as ~10 chaves de cada jogador da fila. Enquanto
       # houver jogador nunca raspado ele tem prioridade (é o backfill inicial);
       # depois disso a fila contém só quem a sentinela marcou.
       #
-      # POR QUE ISTO CHAMA O SITE EM VEZ DE RODAR `npm run espelho -- fundo`:
-      # medido em 10/08/2026, os runners do Actions levam 403 do WAF do
-      # CloudFront em `tmapi.transfermarkt.technology`, origem de cinco das dez
-      # chaves de um jogador. A prova de que é a rede e não o código: no mesmo
-      # minuto em que este job falhava com 403, a chave `perf:686445` era
-      # gravada por produção. O Oxygen passa; o Actions não.
-      #
-      # Então quem raspa é o Worker, via `/api/espelho`, e este passo só
-      # orquestra — em lotes pequenos, porque o Worker tem teto de
-      # subrequisições por requisição.
+      # Também pelo Oxygen, e pelo motivo explicado no cabeçalho: o runner leva
+      # 403 do WAF. Aqui o lote é pequeno porque cada jogador custa ~10
+      # requisições à origem mais ~10 gravações no Supabase, e o Worker tem teto
+      # de subrequisições por requisição.
       - name: Jogadores (fundo, pelo Oxygen)
         if: env.MODO == 'ambos' || env.MODO == 'fundo'
-        env:
-          BASE: ${{ vars.SITE_URL || 'https://www.playersplace.com.br' }}
-          TOKEN: ${{ secrets.ESPELHO_TOKEN || secrets.AQUECIMENTO_TOKEN }}
         run: |
           node -e "
             const base = process.env.BASE;

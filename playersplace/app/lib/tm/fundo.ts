@@ -96,13 +96,21 @@ export async function rasparJogador(id: string): Promise<ResultadoFundo> {
   };
 
   await chave('ficha', () => getPlayer(id));
+
+  // Transferências ANTES dos cinco painéis de estatística, e não por capricho
+  // de ordenação: este JSON alimenta o dicionário com o ID e o nome de todo
+  // clube da carreira deste jogador (ver `colherNomesDeClube`), e é dele que
+  // saem os nomes estrangeiros quando a `tmapi` está devolvendo 403. Depois
+  // dos painéis, chegaria tarde — eles já teriam sido gravados com o ID cru no
+  // lugar do nome, ou teriam falhado por não conseguir resolvê-lo.
+  await chave('transferências', () => getPlayerTransfers(id));
+
   await chave('desempenho', () => getPlayerPerformance(id));
   await chave('carreira', () => getPlayerCareer(id));
   await chave('titularidades', () => getPlayerStartsBySeason(id));
   await chave('jogos', () => getPlayerGameLog(id));
   await chave('seleção', () => getPlayerNationalCareer(id));
   await chave('valor', () => getPlayerMarketValueGraph(id));
-  await chave('transferências', () => getPlayerTransfers(id));
   await chave('lesões', () => getPlayerInjuries(id));
   await chave('rumores', () => getPlayerRumors(id));
 
