@@ -136,7 +136,7 @@ jobs:
 
               for (const liga of ligas) {
                 console.log('=== ' + liga);
-                let inicio = 0, clubes = 0, jogadores = 0;
+                let inicio = 0, clubes = 0, jogadores = 0, recusado = false;
 
                 // O laço termina de um jeito só: o endpoint devolve
                 // \`proximo: null\` quando chegou no fim da lista de clubes.
@@ -151,7 +151,11 @@ jobs:
 
                   if (!r.ok) {
                     console.log('::error::' + liga + ': /api/aquecer respondeu ' + (r.status || 'erro de rede') + ' ' + JSON.stringify(corpo));
+                    if (r.status === 401) {
+                      console.log('::error::401 é o TOKEN, não a origem: confira se ESPELHO_TOKEN ou AQUECIMENTO_TOKEN está cadastrado nas variáveis de ambiente da storefront no Oxygen, com o mesmo valor do secret deste repositório');
+                    }
                     falhas++;
+                    recusado = true;
                     break;
                   }
 
@@ -175,7 +179,12 @@ jobs:
                 // origem devolveu outra coisa. Não pode passar como sucesso: a
                 // base ficaria velha em silêncio, e o passo seguinte acharia a
                 // fila vazia e diria que 'o espelho está em dia'.
-                if (clubes === 0) {
+                //
+                // `recusado` evita o diagnóstico errado: quando o endpoint já
+                // respondeu 401 ou 5xx, zero clube é CONSEQUÊNCIA disso, e
+                // acusar a origem por cima manda quem lê o log investigar o
+                // Transfermarkt quando o problema é o nosso token.
+                if (clubes === 0 && !recusado) {
                   console.log('::error::' + liga + ': nenhum clube gravado — a origem está recusando as requisições');
                   falhas++;
                 }

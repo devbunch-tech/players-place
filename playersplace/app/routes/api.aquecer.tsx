@@ -56,13 +56,28 @@ const LOTE_MAX = 20;
  */
 const PAUSA_MS = 400;
 
+/**
+ * Os dois nomes de token, e os dois nomes de cabeçalho, valem aqui.
+ *
+ * NÃO É TOLERÂNCIA GRATUITA — é o conserto de uma assimetria que já custou uma
+ * execução: o `/api/espelho` aceita `ESPELHO_TOKEN || AQUECIMENTO_TOKEN` desde
+ * que foi escrito, e esta rota aceitava só o segundo. Como o repositório tem
+ * cadastrado apenas o `ESPELHO_TOKEN`, o job de espelho de 10/08/2026 às 21:59
+ * levou 401 nas duas competições e não gravou uma linha — com a mensagem
+ * "nenhum clube gravado", que aponta para a origem e não para o token.
+ *
+ * As duas rotas são o mesmo tipo de job de manutenção, protegidas pelo mesmo
+ * segredo. Exigir dois nomes diferentes para a mesma coisa não acrescenta
+ * segurança nenhuma; só cria este modo de falha.
+ */
 function autorizado(request: Request, env: Env): boolean {
-  const esperado = env.AQUECIMENTO_TOKEN;
+  const esperado = env.AQUECIMENTO_TOKEN || env.ESPELHO_TOKEN;
   // sem token cadastrado a rota fica desligada, e não aberta: ela custa
   // dezenas de requisições ao Transfermarkt por chamada
   if (!esperado) return false;
   const recebido =
     request.headers.get('x-aquecer-token') ??
+    request.headers.get('x-espelho-token') ??
     new URL(request.url).searchParams.get('token');
   return recebido === esperado;
 }
