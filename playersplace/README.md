@@ -89,8 +89,22 @@ não para a página existir.
 | Onde | O que faz |
 | --- | --- |
 | `supabase/006_espelho.sql` | Detecção de mudança por conteúdo (`hash`) e a fila de jogadores (`sujo`) |
-| `scripts/espelho.ts` | O job que enche e mantém o banco (roda em Node, fora do Oxygen) |
-| `.github/workflows/espelho.yml` | Dispara o job todo dia às 03:00 BRT |
+| `app/lib/tm/fundo.ts` | As ~10 chaves de um jogador — a lista, compartilhada pelos dois caminhos |
+| `scripts/espelho.ts` | A sentinela (modo `raso`), em Node no GitHub Actions |
+| `app/routes/api.espelho.tsx` | A raspagem profunda, dentro do Oxygen |
+| `.github/workflows/espelho.yml` | Dispara os dois todo dia às 03:00 BRT |
+
+### Por que a raspagem profunda roda no Worker
+
+Ela deveria rodar toda no Actions, e não roda. Medido em 10/08/2026, os runners
+levam **403 do WAF do CloudFront** em `tmapi.transfermarkt.technology` — origem
+de cinco das dez chaves de um jogador (desempenho, carreira, titularidades,
+jogos, seleção). A prova de que é a rede e não o código: no mesmo minuto em que
+o job falhava com 403, a chave `perf:686445` era gravada por produção.
+
+O host de HTML responde 200 para os runners, então o modo `raso` — que é todo
+HTML — continua rodando lá. Só o `fundo` mudou de casa: o Actions chama
+`/api/espelho` em lotes pequenos e o Worker faz a raspagem.
 
 **Como ele evita re-raspar 120 mil chaves por dia**
 
@@ -115,6 +129,16 @@ cada 60 s — o `If-Modified-Since` volta 200, nunca 304.
 1. Rodar `supabase/006_espelho.sql` no SQL Editor (é idempotente).
 2. Cadastrar `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` nos *secrets* do
    repositório no GitHub.
+2b. **O token do `/api/espelho`, nos DOIS lugares.** Escolha um valor qualquer e
+   cadastre como `ESPELHO_TOKEN` (ou reuse o `AQUECIMENTO_TOKEN`):
+
+   - nos *secrets* do repositório — é quem o job usa para chamar;
+   - na storefront do Oxygen (Shopify admin → Hydrogen → Storefront settings →
+     Environments and variables) — é quem o Worker usa para conferir.
+
+   Sem o token dos dois lados a rota responde 401, e sem ele cadastrado no
+   Worker ela fica **desligada** em vez de aberta — cada chamada custa dezenas
+   de requisições ao Transfermarkt, então o padrão seguro é recusar.
 3. O escopo padrão é **raso nas 24 competições, fundo em BRA1+BRA2**: ~2.400
    requisições de sentinela e ~5.200 de raspagem profunda, o que fecha na
    primeira noite. A fila é retomável — cada jogador é carimbado assim que

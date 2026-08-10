@@ -63,6 +63,19 @@ declare global {
     AQUECIMENTO_TOKEN?: string;
 
     /**
+     * Token do `/api/espelho`, a raspagem profunda que roda dentro do Worker.
+     *
+     * Opcional porque o endpoint aceita o `AQUECIMENTO_TOKEN` como alternativa:
+     * são dois jobs de manutenção do mesmo tipo, e exigir um segredo separado
+     * seria burocracia sem ganho. Cadastre este só se quiser poder revogar um
+     * sem derrubar o outro.
+     *
+     * Sem NENHUM dos dois cadastrados a rota fica desligada, e não aberta: cada
+     * chamada custa dezenas de requisições ao Transfermarkt.
+     */
+    ESPELHO_TOKEN?: string;
+
+    /**
      * Chave da YouTube Data API v3, usada para achar o vídeo de highlights da
      * página do jogador. Opcional: sem ela o bloco vira um botão que abre a
      * busca no YouTube, em vez de sumir ou quebrar.

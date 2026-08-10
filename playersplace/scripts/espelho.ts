@@ -11,11 +11,23 @@
  *
  * POR QUE FORA DO WORKER
  *
- * São ~120 mil chaves nas 24 ligas cobertas. O Oxygen tem teto de subrequests
- * por requisição, o que daria uns 4 jogadores por chamada e milhares de
- * chamadas HTTP só para orquestrar. Aqui é um processo Node no GitHub Actions
- * que importa os MESMOS getters de `app/lib/tm` que as páginas usam — não há
- * uma segunda implementação da raspagem para divergir da primeira.
+ * O Oxygen tem teto de subrequisições por requisição, o que daria uns poucos
+ * jogadores por chamada e milhares de chamadas HTTP só para orquestrar. Aqui é
+ * um processo Node no GitHub Actions que importa os MESMOS getters de
+ * `app/lib/tm` que as páginas usam — não há uma segunda implementação da
+ * raspagem para divergir da primeira.
+ *
+ * ATENÇÃO — O MODO `fundo` NÃO RODA MAIS NO ACTIONS EM PRODUÇÃO
+ *
+ * Medido em 10/08/2026: os runners do Actions levam 403 do WAF do CloudFront em
+ * `tmapi.transfermarkt.technology`, origem de cinco das dez chaves de um
+ * jogador. O host de HTML responde 200 normalmente para eles — por isso o modo
+ * `raso`, que é todo HTML, continua rodando aqui sem problema.
+ *
+ * A raspagem profunda passou para `/api/espelho`, dentro do Oxygen, cuja rede
+ * de saída passa pelo WAF. Este modo `fundo` continua existindo para uso local
+ * e para o dia em que o bloqueio sair — a lista de chaves é a mesma dos dois
+ * lados, em `app/lib/tm/fundo.ts`.
  *
  * OS DOIS MODOS
  *
@@ -56,18 +68,9 @@ import {
   getLeagueStandings,
   getLeagueStats,
   getLeagueTopPlayers,
-  getPlayer,
-  getPlayerCareer,
-  getPlayerGameLog,
-  getPlayerInjuries,
-  getPlayerMarketValueGraph,
-  getPlayerNationalCareer,
-  getPlayerPerformance,
-  getPlayerRumors,
-  getPlayerStartsBySeason,
-  getPlayerTransfers,
   renovarClube,
 } from '../app/lib/tm';
+import {CHAVES_POR_JOGADOR, rasparJogador} from '../app/lib/tm/fundo';
 import {
   ativarModoEspelho,
   definirRitmo,
@@ -186,24 +189,10 @@ async function tentar<T>(
   }
 }
 
-/**
- * A falha diz "não deu para saber", e não "não existe"?
- *
- * A distinção decide se o jogador sai da fila. Um 404 é resposta: aquele
- * jogador não tem página de rumores, e insistir amanhã só gastaria requisição.
- * Qualquer outra coisa — origem fora do ar, 403, 429, 5xx — significa que a
- * chave continua faltando no espelho, e ela precisa voltar amanhã.
- *
- * POR QUE ISTO EXISTE: medido em 10/08/2026, `tmapi.transfermarkt.technology`
- * responde 403 (bloqueio de WAF do CloudFront) para algumas redes, enquanto o
- * host de HTML responde 200 normalmente. Sem esta separação, uma noite inteira
- * atrás de um IP bloqueado marcaria milhares de jogadores como raspados a
- * fundo com metade das chaves faltando — e eles NUNCA mais voltariam à fila.
- * O espelho ficaria permanentemente incompleto, em silêncio.
- */
-function transitoria(e: unknown): boolean {
-  return !/respondeu 404/.test(motivo(e));
-}
+// `transitoria`, `rasparJogador` e a contagem de chaves moram em
+// `app/lib/tm/fundo.ts` — o mesmo módulo que o `/api/espelho` usa no Worker.
+// Duas implementações da mesma lista de chaves divergiriam na primeira vez que
+// alguém acrescentasse uma.
 
 // ---------------------------------------------------------------------------
 // Modo raso — a varredura que decide quem mudou
@@ -340,42 +329,6 @@ async function rodarRaso(db: Db, opcoes: Opcoes) {
 // Modo fundo — as chaves pesadas de cada jogador
 // ---------------------------------------------------------------------------
 
-/**
- * As ~9 chaves que compõem a página do jogador.
- *
- * Sequencial, e não `Promise.all`, por dois motivos: o ritmo de 400 ms serializa
- * tudo de qualquer jeito, e `perf`/`career`/`starts` são construídos sobre a
- * MESMA chave `perfraw:` — em série a segunda e a terceira acertam a memória do
- * processo, em paralelo as três iriam à origem buscar o mesmo JSON.
- *
- * Cada chave é tentada isoladamente: um jogador sem histórico de seleção não
- * pode custar a carreira dele.
- *
- * Devolve quantas chaves ficaram FALTANDO por motivo transitório. Só sai da
- * fila quem voltou com zero — ver `transitoria`.
- */
-async function rasparFundo(id: string): Promise<number> {
-  let faltando = 0;
-  const anotar = (e: unknown) => {
-    if (transitoria(e)) faltando++;
-  };
-  const k = <T>(rotulo: string, fn: () => Promise<T>, padrao: T) =>
-    tentar(`${rotulo} ${id}`, fn, padrao, anotar);
-
-  await k('ficha', () => getPlayer(id), null);
-  await k('desempenho', () => getPlayerPerformance(id), []);
-  await k('carreira', () => getPlayerCareer(id), null);
-  await k('titularidades', () => getPlayerStartsBySeason(id), []);
-  await k('jogos', () => getPlayerGameLog(id), null);
-  await k('seleção', () => getPlayerNationalCareer(id), []);
-  await k('valor', () => getPlayerMarketValueGraph(id), null);
-  await k('transferências', () => getPlayerTransfers(id), []);
-  await k('lesões', () => getPlayerInjuries(id), []);
-  await k('rumores', () => getPlayerRumors(id), []);
-
-  return faltando;
-}
-
 /** quantos jogadores a fila entrega por vez */
 const LOTE_FILA = 200;
 
@@ -387,7 +340,6 @@ const LOTE_FILA = 200;
  * linhas incompletas. Melhor terminar em vermelho, com o motivo no log.
  */
 const FALHAS_SEGUIDAS_ATE_DESISTIR = 10;
-const CHAVES_POR_JOGADOR = 10;
 
 async function rodarFundo(db: Db, opcoes: Opcoes) {
   const limite = Date.now() + opcoes.minutos * 60_000;
@@ -412,7 +364,8 @@ async function rodarFundo(db: Db, opcoes: Opcoes) {
     for (const j of fila) {
       if (Date.now() > limite || requisicoesFeitas() >= opcoes.orcamento) break;
 
-      const faltando = await rasparFundo(j.id);
+      const {faltando, erros} = await rasparJogador(j.id);
+      for (const e of erros) log(`  ! ${j.nome}: ${e}`);
       feitos++;
       if (j.novo) novos++;
 

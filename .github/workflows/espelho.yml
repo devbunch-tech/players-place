@@ -119,12 +119,86 @@ jobs:
             --orcamento=6000 --minutos=90 \
             ${LIGAS_RASO:+--ligas=$LIGAS_RASO}
 
-      # A raspagem profunda: as ~9 chaves de cada jogador da fila. Enquanto
+      # A raspagem profunda: as ~10 chaves de cada jogador da fila. Enquanto
       # houver jogador nunca raspado ele tem prioridade (é o backfill inicial);
       # depois disso a fila contém só quem a sentinela marcou.
-      - name: Jogadores (fundo)
+      #
+      # POR QUE ISTO CHAMA O SITE EM VEZ DE RODAR `npm run espelho -- fundo`:
+      # medido em 10/08/2026, os runners do Actions levam 403 do WAF do
+      # CloudFront em `tmapi.transfermarkt.technology`, origem de cinco das dez
+      # chaves de um jogador. A prova de que é a rede e não o código: no mesmo
+      # minuto em que este job falhava com 403, a chave `perf:686445` era
+      # gravada por produção. O Oxygen passa; o Actions não.
+      #
+      # Então quem raspa é o Worker, via `/api/espelho`, e este passo só
+      # orquestra — em lotes pequenos, porque o Worker tem teto de
+      # subrequisições por requisição.
+      - name: Jogadores (fundo, pelo Oxygen)
         if: env.MODO == 'ambos' || env.MODO == 'fundo'
+        env:
+          BASE: ${{ vars.SITE_URL || 'https://www.playersplace.com.br' }}
+          TOKEN: ${{ secrets.ESPELHO_TOKEN || secrets.AQUECIMENTO_TOKEN }}
         run: |
-          npm run espelho -- fundo \
-            --orcamento=$ORCAMENTO --minutos=240 \
-            ${LIGAS_FUNDO:+--ligas=$LIGAS_FUNDO}
+          node -e "
+            const base = process.env.BASE;
+            const token = process.env.TOKEN;
+            const ligas = process.env.LIGAS_FUNDO || '';
+            // Orçamento em REQUISIÇÕES ao Transfermarkt, como no script: cada
+            // jogador custa ~10, então convertemos para chamadas ao endpoint.
+            const LOTE = 3;
+            const teto = Math.max(1, Math.floor(Number(process.env.ORCAMENTO || 20000) / (10 * LOTE)));
+
+            if (!token) {
+              console.log('::error::cadastre ESPELHO_TOKEN (ou AQUECIMENTO_TOKEN) nos secrets E na storefront do Oxygen');
+              process.exit(1);
+            }
+
+            (async () => {
+              let chamadas = 0, completos = 0, incompletos = 0, seguidasVazias = 0;
+
+              while (chamadas < teto) {
+                const qs = new URLSearchParams({limite: String(LOTE)});
+                if (ligas) qs.set('ligas', ligas);
+
+                const r = await fetch(base + '/api/espelho?' + qs, {
+                  method: 'POST',
+                  headers: {'x-espelho-token': token},
+                }).catch((e) => ({ok: false, status: 0, erro: e.message}));
+
+                const corpo = r.json ? await r.json().catch(() => ({})) : {};
+                chamadas++;
+
+                if (!r.ok) {
+                  console.log('::error::/api/espelho respondeu ' + (r.status || 'erro de rede') + ' ' + JSON.stringify(corpo));
+                  process.exit(1);
+                }
+
+                completos += corpo.completos || 0;
+                incompletos += (corpo.incompletos || []).length;
+                for (const e of (corpo.erros || []).slice(0, 3)) console.log('::warning::' + e);
+
+                // Fila seca: não há mais ninguém sujo nas ligas pedidas.
+                if (!corpo.proximo) { console.log('fila vazia — o espelho está em dia'); break; }
+
+                // Nada saiu completo em três chamadas seguidas: a origem está
+                // recusando. Insistir só queimaria o orçamento produzindo
+                // linhas incompletas — e a fila é preservada de qualquer forma,
+                // porque o endpoint só carimba quem volta inteiro.
+                seguidasVazias = (corpo.completos || 0) === 0 ? seguidasVazias + 1 : 0;
+                if (seguidasVazias >= 3) {
+                  console.log('::error::três lotes seguidos sem nenhum jogador completo — a origem está recusando. Nada foi tirado da fila.');
+                  process.exit(1);
+                }
+
+                console.log(chamadas + ': +' + (corpo.completos || 0) + ' completos, ' + (corpo.incompletos || []).length + ' incompletos (' + (corpo.duracaoMs || 0) + 'ms)');
+
+                // Espaça as chamadas: cada uma dispara ~30 requisições ao
+                // Transfermarkt de uma vez, e o Worker não impõe ritmo (fazer
+                // isso lá atrasaria as páginas de visitantes reais).
+                await new Promise((s) => setTimeout(s, 2000));
+              }
+
+              console.log('----');
+              console.log('chamadas: ' + chamadas + ' · completos: ' + completos + ' · incompletos: ' + incompletos);
+            })();
+          "
