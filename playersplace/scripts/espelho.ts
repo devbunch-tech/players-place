@@ -323,6 +323,24 @@ async function rodarRaso(db: Db, opcoes: Opcoes) {
     `\nraso: ${clubes} clubes · ${jogadores} jogadores · ` +
       `${sujos} marcados para raspagem profunda · ${requisicoesFeitas()} requisições`,
   );
+
+  // Uma passada que não raspou NENHUM clube não é uma passada bem-sucedida.
+  //
+  // POR QUE PRECISA ESTAR AQUI: em 10/08/2026 este job rodou no Actions depois
+  // de o WAF do CloudFront bloquear aqueles IPs. As 24 competições voltaram
+  // uma página de bloqueio com HTTP 200, o parser produziu estrutura vazia, e o
+  // job terminou com "0 clubes · 24 requisições" e **exit 0** — verde na aba
+  // Actions. O sinal de que nada funcionou ficou enterrado no log.
+  //
+  // Zero clubes em todas as ligas pedidas só acontece por falha sistêmica
+  // (origem fora, bloqueio, parser quebrado). Nenhuma delas deve passar
+  // despercebida.
+  if (ligas.length && clubes === 0) {
+    throw new Error(
+      `nenhum clube raspado em ${ligas.length} competições — ` +
+        'origem bloqueada, fora do ar, ou o parser quebrou. Nada foi gravado.',
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------

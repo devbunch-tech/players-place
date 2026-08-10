@@ -96,13 +96,45 @@ export interface MarketValueGraph {
   last_change: string;
 }
 
+/**
+ * Chave, validade e busca da competição num lugar só — mesmo motivo do `CLUBE`
+ * logo abaixo: quem aquece e quem lê precisam usar a MESMA string de chave.
+ */
+const LIGA = {
+  chave: (code: string) => `league:${code}`,
+  ttl: 6 * HOUR,
+  buscar: async (code: string) => {
+    const liga = parseLeagueOverview(
+      await tmHtml(`/-/startseite/wettbewerb/${code}`),
+    );
+
+    // TODA competição tem clubes. Zero significa que a origem devolveu outra
+    // coisa — bloqueio de WAF, manutenção, redirect, HTML remodelado — e o
+    // parser digeriu sem reclamar.
+    //
+    // ISTO JÁ ACONTECEU, e por falta exatamente deste guarda: em 10/08/2026 o
+    // job de espelho rodou a partir do GitHub Actions depois de o WAF do
+    // CloudFront passar a bloquear aqueles IPs. As 24 páginas de competição
+    // voltaram 200 com uma página de bloqueio, o parser produziu
+    // `{name: '', clubs: []}`, e o job GRAVOU isso por cima das 24 chaves boas.
+    // Toda página /competicoes/:code ficou vazia até as chaves serem apagadas
+    // à mão. O `CLUBE.buscar` tinha o guarda equivalente desde 06/08 e não foi
+    // atingido; esta chave não tinha.
+    //
+    // Lançar é o que dá o comportamento certo: nada é gravado, e as camadas de
+    // cache seguem servindo a cópia boa anterior.
+    if (!liga.clubs.length) {
+      throw new Error(`competição ${code} sem clubes — origem suspeita`);
+    }
+    return liga;
+  },
+};
+
 /** a competição com a procedência — ver `getPlayerRegistro` */
 export function getLeagueOverviewRegistro(
   code: string,
 ): Promise<Registro<LeagueOverview>> {
-  return cachedRegistro(`league:${code}`, 6 * HOUR, async () =>
-    parseLeagueOverview(await tmHtml(`/-/startseite/wettbewerb/${code}`)),
-  );
+  return cachedRegistro(LIGA.chave(code), LIGA.ttl, () => LIGA.buscar(code));
 }
 
 export async function getLeagueOverview(code: string): Promise<LeagueOverview> {
@@ -213,7 +245,9 @@ export function getRodadaAtual(code: string): Promise<RodadaInfo> {
       getLeagueStandings(code).catch(() => []),
       getLeagueOverview(code).catch(() => null),
     ]);
-    const jogos = standings.flatMap((g) => g.rows).map((r) => Number(r.played) || 0);
+    const jogos = standings
+      .flatMap((g) => g.rows)
+      .map((r) => Number(r.played) || 0);
     const round = jogos.length ? Math.max(...jogos) + 1 : 1;
     const season = seasonId(overview?.season ?? '');
 
@@ -287,7 +321,12 @@ export async function getRoundResults(
     }
   }
 
-  return {complete: true, jogos: jogos.length, encerrados: encerrados.length, stats};
+  return {
+    complete: true,
+    jogos: jogos.length,
+    encerrados: encerrados.length,
+    stats,
+  };
 }
 
 export function getClubAbsences(id: string): Promise<ClubAbsence[]> {
@@ -394,9 +433,7 @@ export async function getMatchBriefing(
       parseMatchPreview(
         await tmHtml(`/spielbericht/index/spielbericht/${matchId}`),
       ),
-    ).catch(
-      (): MatchPreview => ({stadium: null, referee: null, doubts: []}),
-    ),
+    ).catch((): MatchPreview => ({stadium: null, referee: null, doubts: []})),
     getClubUnavailable(homeId).catch(() => vazio),
     getClubUnavailable(awayId).catch(() => vazio),
   ]);
@@ -785,7 +822,10 @@ export function getPlayerPerformance(id: string): Promise<SeasonPerf[]> {
       for (const l of season.labels) counts.set(l, (counts.get(l) ?? 0) + 1);
       const label = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
       const rows = [...season.comps.values()]
-        .map((c) => ({...c, name: names.get(c.competitionId) ?? c.competitionId}))
+        .map((c) => ({
+          ...c,
+          name: names.get(c.competitionId) ?? c.competitionId,
+        }))
         .sort((a, b) => b.minutes - a.minutes);
       const total = rows.reduce(
         (acc, c) => ({
@@ -798,7 +838,16 @@ export function getPlayerPerformance(id: string): Promise<SeasonPerf[]> {
           red: acc.red + c.red,
           minutes: acc.minutes + c.minutes,
         }),
-        {games: 0, goals: 0, assists: 0, conceded: 0, starts: 0, yellow: 0, red: 0, minutes: 0},
+        {
+          games: 0,
+          goals: 0,
+          assists: 0,
+          conceded: 0,
+          starts: 0,
+          yellow: 0,
+          red: 0,
+          minutes: 0,
+        },
       );
       return {seasonId: sid, label, rows, total};
     });
@@ -1010,7 +1059,9 @@ const isoToBrShort = (iso: string | null): string | null => {
   return m ? `${m[4]}/${m[3]}/${m[2]}` : null;
 };
 
-export function getPlayerNationalCareer(id: string): Promise<NationalTeamRow[]> {
+export function getPlayerNationalCareer(
+  id: string,
+): Promise<NationalTeamRow[]> {
   return cached(`nat:${id}`, 6 * HOUR, async () => {
     const res = await tmApiJson<{data?: {history?: ApiNationalCareer[]}}>(
       `/player/${id}/national-career-history`,
@@ -1383,7 +1434,11 @@ export async function getExpiringContracts(
   page = 1,
   nationality?: string | null,
 ): Promise<MarketList> {
-  const list = await marketList('/statistik/endendevertraege', page, nationality);
+  const list = await marketList(
+    '/statistik/endendevertraege',
+    page,
+    nationality,
+  );
   const rows = await Promise.all(
     list.rows.map(async (row) => {
       if (!(Number(row.rumors) > 0)) return row;
