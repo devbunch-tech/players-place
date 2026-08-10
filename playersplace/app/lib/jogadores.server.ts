@@ -515,18 +515,42 @@ export interface ResumoExecucao {
   duracaoMs: number;
 }
 
-/** carimba a passada do aquecimento, para dar para ver que ele ainda roda */
+/**
+ * Carimba a passada do aquecimento, para dar para ver que ele ainda roda.
+ *
+ * Os números saem da BASE, e não do `resumo` de quem chamou. O motivo é o
+ * fatiamento: o aquecimento vem em lotes, cada requisição só conhece o próprio
+ * lote, e quem carimba é a última. Somar o resumo do último lote registrava
+ * "BRA1 → 5 clubes, 168 jogadores" no fim de uma série que gravou 20 clubes e
+ * 666 jogadores — exatamente o que o comentário em `005_jogadores_base.sql`
+ * dizia que não queria. Pior que impreciso: quem lê o painel para saber se o
+ * job está saudável via um número de tamanho errado e não tinha como
+ * desconfiar.
+ *
+ * Contar as linhas resolve sem estado nenhum entre os lotes, e mede o que
+ * importa de verdade — o que ficou GRAVADO, não o que foi processado.
+ */
 export async function registrarExecucao(
   db: Db | null,
   resumo: ResumoExecucao,
 ): Promise<void> {
   if (!db) return;
   try {
+    const {data} = await db
+      .from(TABELA)
+      .select('clube_id')
+      .eq('liga_code', resumo.liga);
+
+    const linhas = (data ?? []) as unknown as {clube_id: string | null}[];
+    const clubes = new Set(linhas.map((l) => l.clube_id).filter(Boolean)).size;
+
     await db.from(TABELA_EXECUCAO).upsert(
       {
         liga_code: resumo.liga,
-        clubes: resumo.clubes,
-        jogadores: resumo.jogadores,
+        // sem linhas na base o `select` acima pode ter falhado; aí o número do
+        // lote é melhor que zero
+        clubes: clubes || resumo.clubes,
+        jogadores: linhas.length || resumo.jogadores,
         erros: resumo.erros.length,
         duracao_ms: Math.round(resumo.duracaoMs),
         concluido_em: new Date().toISOString(),

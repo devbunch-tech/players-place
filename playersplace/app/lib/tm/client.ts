@@ -188,6 +188,22 @@ export function nomesNaMemoria(
 }
 
 /**
+ * IDs que este isolate JÁ PERGUNTOU ao dicionário e não encontrou.
+ *
+ * Sem isto, um ID que o dicionário não conhece custa uma consulta ao Supabase
+ * em TODA leitura da página — inclusive na segunda visita do mesmo visitante,
+ * porque só o acerto era memorizado. Um clube extinto na carreira de um jogador
+ * popular viraria uma consulta por pageview, para sempre, sempre com a mesma
+ * resposta vazia.
+ *
+ * O esquecimento é a morte do isolate, que é curta: se alguém gravar o nome
+ * enquanto isso, o próximo isolate já o encontra. E `lembrarNome` apaga a marca
+ * na hora em que o nome aparece, então a raspagem que resolve o ID conserta a
+ * leitura em curso também.
+ */
+const nomesAusentes = new Set<string>();
+
+/**
  * Os nomes gravados, numa consulta só. Nunca lança: sem dicionário o chamador
  * cai na origem, que é o comportamento de antes desta tabela existir.
  */
@@ -196,21 +212,27 @@ export async function nomesSalvos(
   ids: string[],
 ): Promise<Map<string, string>> {
   const achados = new Map<string, string>();
-  if (!dbAtual || !ids.length) return achados;
+  const perguntar = ids.filter((id) => !nomesAusentes.has(chaveNome(tipo, id)));
+  if (!dbAtual || !perguntar.length) return achados;
 
   try {
     const {data, error} = await dbAtual
       .from(TABELA_NOMES)
       .select('id, nome')
       .eq('tipo', tipo)
-      .in('id', ids);
-    // tabela ausente (migração 007 não aplicada) cai aqui e vira "não sei"
+      .in('id', perguntar);
+    // tabela ausente (migração 007 não aplicada) cai aqui e vira "não sei" — e
+    // "não sei" não pode virar ausência memorizada, ou a migração aplicada
+    // depois demoraria a fazer efeito
     if (error || !data) return achados;
 
     for (const l of data as unknown as {id: string; nome: string}[]) {
       if (!l.nome) continue;
       achados.set(l.id, l.nome);
       lembrarNome(tipo, l.id, l.nome);
+    }
+    for (const id of perguntar) {
+      if (!achados.has(id)) nomesAusentes.add(chaveNome(tipo, id));
     }
   } catch {
     // dicionário indisponível nunca pode derrubar a página
@@ -219,6 +241,7 @@ export async function nomesSalvos(
 }
 
 function lembrarNome(tipo: TipoNome, id: string, nome: string): void {
+  nomesAusentes.delete(chaveNome(tipo, id));
   if (nomesMemoria.size >= MAX_NOMES) {
     const antigo = nomesMemoria.keys().next().value;
     if (antigo) nomesMemoria.delete(antigo);
