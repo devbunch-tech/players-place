@@ -215,7 +215,7 @@ jobs:
                   if (inicio !== null) await new Promise((s) => setTimeout(s, 2000));
                 }
 
-                // `sujos` é o sinal de que a sentinela está viva: são os
+                // \`sujos\` é o sinal de que a sentinela está viva: são os
                 // jogadores que entraram na fila de raspagem profunda por lesão
                 // nova ou por o clube ter entrado em campo. Zero durante uma
                 // rodada inteira é sintoma, não silêncio.
@@ -226,7 +226,7 @@ jobs:
                 // base ficaria velha em silêncio, e o passo seguinte acharia a
                 // fila vazia e diria que 'o espelho está em dia'.
                 //
-                // `recusado` evita o diagnóstico errado: quando o endpoint já
+                // \`recusado\` evita o diagnóstico errado: quando o endpoint já
                 // respondeu 401 ou 5xx, zero clube é CONSEQUÊNCIA disso, e
                 // acusar a origem por cima manda quem lê o log investigar o
                 // Transfermarkt quando o problema é o nosso token.
