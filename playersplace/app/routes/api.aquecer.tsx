@@ -26,11 +26,18 @@
  *
  *   GET  /api/aquecer   → só relata o estado da base (não escreve nada)
  */
-import {findLeague, getLeagueOverview, renovarClube} from '~/lib/tm';
+import {
+  findLeague,
+  getClubAbsences,
+  getClubForm,
+  getLeagueOverview,
+  renovarClube,
+} from '~/lib/tm';
 import {expurgarVazias} from '~/lib/tm/client';
 import {getDb} from '~/lib/db';
 import {
   gravarElencoBase,
+  marcarSujos,
   registrarExecucao,
   type ResumoExecucao,
 } from '~/lib/jogadores.server';
@@ -40,14 +47,90 @@ import type {Route} from './+types/api.aquecer';
 const PADRAO = 'BRA1';
 
 /**
- * Quantos clubes por chamada. Dez porque a Série A tem 20 e a B tem 20: duas
- * chamadas por série é pouco o bastante para o job ser simples e pequeno o
- * bastante para caber com folga no teto de subrequests do Worker.
+ * Quantos clubes por chamada.
+ *
+ * CAIU DE 10 PARA 5 quando os dois sinais de sentinela entraram aqui: o custo
+ * por clube subiu de ~4 subrequisições (raspar o elenco + as escritas do
+ * Supabase) para ~7 (mais ausências, forma e a marcação). Cinco mantém a
+ * chamada na mesma casa de antes — ~35 — em vez de dobrá-la para 70, que é
+ * onde um teto de subrequisições do Worker começaria a ser plausível.
+ *
+ * Chamar mais vezes é barato: o laço do job já usa o `proximo` da resposta.
+ * Estourar o teto no meio, não — deixa a base pela metade sem erro visível.
  */
-const LOTE_PADRAO = 10;
+const LOTE_PADRAO = 5;
 
 /** teto do que aceitamos numa chamada, mesmo se pedirem mais */
-const LOTE_MAX = 20;
+const LOTE_MAX = 10;
+
+/**
+ * Quantos dias para trás um jogo conta como "acabou de acontecer".
+ *
+ * Dois, e não um, porque o job roda diariamente: um dia em que o Actions falhe
+ * não pode deixar uma rodada inteira passar sem ninguém marcar os elencos que
+ * entraram em campo. O custo de errar para mais é re-raspar um elenco à toa; o
+ * de errar para menos é o espelho congelar sem sinal nenhum.
+ */
+const DIAS_JOGO_RECENTE = 2;
+
+/** aaaammdd de N dias atrás — o formato de `sortKey` de `ClubMatch` */
+function chaveDeDiasAtras(dias: number): string {
+  const d = new Date(Date.now() - dias * 24 * 3600 * 1000);
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`;
+}
+
+/**
+ * Quem, neste clube, mudou sem que o elenco mostrasse.
+ *
+ * POR QUE ISTO PRECISOU VIR PARA CÁ
+ *
+ * A sentinela tem três sinais, e até agora só um rodava em produção. O elenco
+ * publicado (nome, número, posição, valor, clube) é comparado por
+ * `gravarElencoBase` e pega transferência, promoção e reavaliação de mercado.
+ * Os outros dois viviam só em `scripts/espelho.ts` — que não roda mais, porque
+ * os runners do Actions levam 403 do WAF. O efeito era silencioso e grave: um
+ * jogador que atuou no domingo, sem mudar de número nem de valor, NUNCA era
+ * marcado como sujo. O histórico de jogos e o desempenho dele no espelho
+ * congelavam, e só se moviam se alguém abrisse a página e a validade da chave
+ * tivesse vencido.
+ *
+ * Os dois sinais que faltavam:
+ *
+ *  1. está no departamento médico — uma lesão nova não mexe em uma linha
+ *     sequer do elenco, e muda a página do jogador;
+ *  2. o clube entrou em campo — aí o histórico de jogos e o desempenho por
+ *     temporada de TODO o elenco mudaram de uma vez.
+ *
+ * Nunca lança: sentinela é heurística, e uma falha aqui significa "não
+ * descobri nada novo neste clube hoje", não "aborte o aquecimento".
+ */
+async function sinaisDeMudanca(
+  clubeId: string,
+  elenco: string[],
+  recente: string,
+): Promise<string[]> {
+  const ids = new Set<string>();
+
+  try {
+    for (const a of await getClubAbsences(clubeId)) {
+      if (a.playerId) ids.add(a.playerId);
+    }
+  } catch {
+    // sem a lista de ausências o clube segue pelos outros dois sinais
+  }
+
+  try {
+    const {last} = await getClubForm(clubeId);
+    if (last.some((m) => m.sortKey >= recente)) {
+      for (const id of elenco) ids.add(id);
+    }
+  } catch {
+    // idem: a próxima passada tenta de novo
+  }
+
+  return [...ids];
+}
 
 /**
  * Pausa entre clubes. A origem é de terceiros e este job é a única parte do
@@ -129,8 +212,10 @@ export async function action({request, context}: Route.ActionArgs) {
 
   const fatia = clubes.slice(inicio, inicio + limite);
   const erros: string[] = [];
+  const recente = chaveDeDiasAtras(DIAS_JOGO_RECENTE);
   let jogadores = 0;
   let processados = 0;
+  let sujos = 0;
 
   for (const [i, c] of fatia.entries()) {
     if (i > 0) await esperar(PAUSA_MS);
@@ -141,6 +226,28 @@ export async function action({request, context}: Route.ActionArgs) {
         ligaCode: liga.code,
         club,
       });
+
+      // DEPOIS de gravar o elenco, e não antes: `gravarElencoBase` faz o upsert
+      // das linhas, e marcar um jogador que ainda não existe na base não teria
+      // efeito nenhum — o `update` do `marcarSujos` não alcança linha ausente.
+      // `players` pode vir vazio de um clube sem elenco publicado, e aí só o
+      // sinal de lesão tem o que dizer. O `?? []` não é zelo gratuito:
+      // `gravarElencoBase` trata esse caso devolvendo 0, e um `.map` em
+      // undefined aqui derrubaria o clube inteiro para o `catch` de fora.
+      const marcar = await sinaisDeMudanca(
+        c.id,
+        club.players?.map((p) => p.id) ?? [],
+        recente,
+      );
+      if (marcar.length) {
+        try {
+          sujos += await marcarSujos(db, marcar);
+        } catch (e) {
+          // o elenco já está gravado; o que se perde é a marcação de hoje
+          erros.push(`marcar sujos ${c.name || c.id}: ${(e as Error).message}`);
+        }
+      }
+
       processados++;
     } catch (e) {
       // um clube fora do ar não pode abortar a série inteira: ele volta no
@@ -167,6 +274,10 @@ export async function action({request, context}: Route.ActionArgs) {
   return Response.json({
     ok: erros.length === 0,
     ...resumo,
+    // quantos jogadores a sentinela mandou para a fila de raspagem profunda.
+    // Vai no corpo porque é o número que diz se ela está VIVA: zero sujos
+    // durante uma rodada inteira é sintoma, não silêncio.
+    sujos,
     de: inicio,
     ate: fim,
     total: clubes.length,

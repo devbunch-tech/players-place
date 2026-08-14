@@ -423,30 +423,25 @@ export interface JogadorSujo {
   novo: boolean;
 }
 
-/**
- * Quem precisa ser raspado a fundo, na ordem certa.
- *
- * A ordenação por `fundo_em nulls first` é o que faz o backfill inicial e a
- * atualização diária serem O MESMO job: enquanto houver jogador nunca raspado
- * ele tem prioridade, e quando a base fica completa a fila naturalmente passa
- * a conter só os que a sentinela marcou. Não há um "modo backfill" para ligar
- * e desligar — e é por isso que o job pode ser cortado a qualquer momento sem
- * que nada precise ser recomeçado.
- *
- * Lança em caso de erro, ao contrário do resto deste módulo: aqui quem chama é
- * um job, e uma fila que voltou vazia porque o banco recusou a consulta seria
- * lida como "está tudo em dia" — o pior desfecho possível.
- */
-export async function lerJogadoresSujos(
+/** uma fatia da fila: só atualizações, ou só backfill */
+async function consultarFila(
   db: Db,
-  opcoes: {ligas?: string[]; limite: number},
+  opcoes: {ligas?: string[]; limite: number; novos: boolean},
 ): Promise<JogadorSujo[]> {
+  if (opcoes.limite <= 0) return [];
+
   let q = db
     .from(TABELA)
     .select('id, nome, liga_code, fundo_em')
     .eq('sujo', true)
-    .order('fundo_em', {ascending: true, nullsFirst: true})
     .limit(opcoes.limite);
+
+  // O que separa os dois níveis. `fundo_em is null` é "nunca foi espelhado"
+  // (backfill); qualquer outra coisa é "já está no espelho e a sentinela
+  // marcou que mudou" (atualização).
+  q = opcoes.novos
+    ? q.is('fundo_em', null)
+    : q.not('fundo_em', 'is', null).order('fundo_em', {ascending: true});
 
   if (opcoes.ligas?.length) q = q.in('liga_code', opcoes.ligas);
 
@@ -469,6 +464,58 @@ export async function lerJogadoresSujos(
       ligaCode: l.liga_code,
       novo: !l.fundo_em,
     }));
+}
+
+/**
+ * Quem precisa ser raspado a fundo, na ordem certa — e a ordem certa mudou.
+ *
+ * ANTES: uma consulta só, `order('fundo_em', nullsFirst: true)`. Isso punha o
+ * backfill inteiro na frente das atualizações, e com duas ligas era inofensivo
+ * (o backfill fechava na primeira noite). Com as 24 do registro deixou de ser:
+ * são ~13 mil jogadores nunca espelhados, três ou quatro noites de fila — e
+ * durante todo esse tempo um jogador que MUDOU de clube ontem ficaria atrás de
+ * todos eles, porque `null` ordena antes de qualquer data. A mudança real
+ * esperaria o backfill terminar.
+ *
+ * AGORA são dois níveis, e o primeiro nunca espera:
+ *
+ *   1. ATUALIZAÇÕES — quem já está no espelho e a sentinela marcou como
+ *      mudado. Do carimbo mais antigo para o mais novo. Estas passam sempre
+ *      à frente, em qualquer liga.
+ *   2. BACKFILL — quem nunca foi espelhado. Ocupa o que sobrar do lote.
+ *
+ * O efeito prático: numa noite normal o nível 1 são algumas dezenas de
+ * jogadores, some em minutos, e o resto da noite inteira vai para o backfill.
+ * Numa segunda-feira de rodada cheia o nível 1 pode tomar o lote todo — e é
+ * exatamente o que se quer, porque o backfill não tem pressa e a mudança tem.
+ *
+ * Continua sendo O MESMO job, sem "modo backfill" para ligar e desligar, e
+ * continua retomável: cada jogador é carimbado assim que termina.
+ *
+ * DUAS CONSULTAS, E NÃO UMA COM `order` COMPOSTO: o PostgREST ordena por
+ * coluna, e não por expressão — não há como pedir "primeiro os não-nulos, por
+ * data". Daria para fazer com uma função no banco, mas isso é uma migração a
+ * mais para resolver o que duas consultas indexadas resolvem; e a segunda só
+ * roda quando a primeira não encheu o lote, que é o caso comum.
+ *
+ * Lança em caso de erro, ao contrário do resto deste módulo: aqui quem chama é
+ * um job, e uma fila que voltou vazia porque o banco recusou a consulta seria
+ * lida como "está tudo em dia" — o pior desfecho possível.
+ */
+export async function lerJogadoresSujos(
+  db: Db,
+  opcoes: {ligas?: string[]; limite: number},
+): Promise<JogadorSujo[]> {
+  const atualizacoes = await consultarFila(db, {...opcoes, novos: false});
+  if (atualizacoes.length >= opcoes.limite) return atualizacoes;
+
+  const novos = await consultarFila(db, {
+    ligas: opcoes.ligas,
+    limite: opcoes.limite - atualizacoes.length,
+    novos: true,
+  });
+
+  return [...atualizacoes, ...novos];
 }
 
 /**

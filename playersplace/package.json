@@ -13,6 +13,7 @@
     "lint": "eslint --no-error-on-unmatched-pattern .",
     "typecheck": "react-router typegen && tsc --noEmit",
     "codegen": "shopify hydrogen codegen && react-router typegen",
+    "whoami": "tsx scripts/whoami.ts",
     "espelho": "tsx scripts/espelho.ts",
     "typecheck:scripts": "tsc -p scripts/tsconfig.json"
   },

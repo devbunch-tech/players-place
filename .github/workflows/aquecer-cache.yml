@@ -88,16 +88,30 @@ jobs:
       # Roda ANTES da visita às páginas de clube de propósito: é ele que enche
       # a `jogadores_base`, que é de onde a página do clube se vira quando o
       # Transfermarkt está fora do ar.
-      - name: Materializa os elencos do Brasileirão
+      #
+      # ERA SÓ BRA1+BRA2, e essa era a origem dos 502 nas outras ligas: sem
+      # linha na base, a página do jogador dependia de a raspagem ao vivo dar
+      # certo naquele segundo. A lista agora sai de `leagues.ts`, como no passo
+      # das páginas — liga nova entra sozinha.
+      #
+      # Este passo faz o mesmo trabalho que a sentinela do `espelho.yml`, e a
+      # duplicação é de propósito: são horários diferentes (03:00 e 06:00 BRT), e
+      # a segunda passada custa pouco (a maioria dos elencos não mudou) enquanto
+      # dá uma segunda chance ao dia em que a origem estava fora no primeiro.
+      - name: Materializa os elencos
         env:
           BASE: ${{ vars.SITE_URL }}
           TOKEN: ${{ secrets.AQUECIMENTO_TOKEN }}
         run: |
           node -e "
+            const fs = require('fs');
             const base = process.env.BASE || 'https://www.playersplace.com.br';
             const token = process.env.TOKEN;
-            const ligas = ['BRA1', 'BRA2'];
+            const src = fs.readFileSync('playersplace/app/lib/tm/leagues.ts', 'utf8');
+            const ligas = [...src.matchAll(/\{code: '([^']+)'/g)].map(m => m[1]);
             let falhou = false;
+
+            if (!ligas.length) { console.log('::error::nenhuma liga encontrada em leagues.ts'); process.exit(1); }
 
             // O segredo é opcional: sem ele o repositório continua rodando o
             // aquecimento de páginas e só pula este passo, em vez de o job
@@ -115,7 +129,10 @@ jobs:
                   // (bug do servidor) rodaria o job para sempre
                   if (++voltas > 12) { console.log('::warning::' + liga + ': lotes demais, abortando'); falhou = true; break; }
 
-                  const url = base + '/api/aquecer?liga=' + liga + '&inicio=' + inicio + '&limite=10';
+                  // limite=5: ver a nota em LOTE_PADRAO no api.aquecer.tsx — o
+                  // custo por clube subiu quando os sinais de sentinela
+                  // entraram lá
+                  const url = base + '/api/aquecer?liga=' + liga + '&inicio=' + inicio + '&limite=5';
                   const r = await fetch(url, { method: 'POST', headers: { 'x-aquecer-token': token } });
                   const corpo = await r.json().catch(() => ({}));
 

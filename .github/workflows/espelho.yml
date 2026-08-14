@@ -32,18 +32,28 @@
 # levava 403, produção gravava as mesmas chaves normalmente. Então o runner
 # ficou só com o papel de relógio e contador.
 #
+# O ESCOPO É O REGISTRO INTEIRO — E ISSO É UMA MUDANÇA
+#
+# Até aqui os dois modos rodavam só em BRA1+BRA2. O efeito disso chegava ao
+# visitante: a página do jogador devolve 502 quando não há linha na
+# `jogadores_base` NEM chave em cache, e era exatamente a situação de todo
+# jogador das outras 22 ligas — a página dependia de a raspagem ao vivo dar
+# certo naquele segundo. Agora o padrão dos dois modos é o `leagues.ts`.
+#
 # O PRIMEIRO CARREGAMENTO
 #
-# Com o escopo padrão (BRA1+BRA2) são ~200 requisições de sentinela e ~5.200 de
-# raspagem profunda: fecha na primeira noite, com folga dentro do orçamento.
+# Sentinela: 24 ligas × ~20 clubes × ~5 requisições ≈ 2.400 por noite. Barato, e
+# é ela que mata o 502 — basta existir a linha na base para a página abrir.
 #
-# A fila é retomável — cada jogador é carimbado assim que termina — então um
-# job cortado no meio continua exatamente de onde parou.
+# Raspagem profunda: ~13 mil jogadores × ~10 chaves ≈ 134 mil requisições. Não
+# cabe numa noite, e não precisa caber: a fila é ordenada por `fundo_em nulls
+# first` e cada jogador é carimbado assim que termina, então o backfill anda
+# ~5 mil jogadores por execução e fecha em três ou quatro noites, sozinho. Ela
+# não é o que evita o 502 — é o que enche os painéis (carreira, jogos,
+# desempenho, lesões) com dado servido do banco em vez de raspado na hora.
 #
-# Para aprofundar outra competição, dispare manualmente com `ligas` e um
-# orçamento maior. Estime antes: são ~10 requisições por jogador, e o teto útil
-# por execução é ~50000 (as 6 h do runner). Ver a nota em LIGAS_FUNDO abaixo
-# antes de pensar em rodar `fundo` sem filtro.
+# Estime antes de mexer no orçamento: são ~10 requisições por jogador, e o teto
+# útil por execução é ~50000 (as 6 h do runner).
 name: espelho
 
 on:
@@ -58,7 +68,13 @@ on:
         default: ambos
       orcamento:
         description: 'teto de requisições ao Transfermarkt no modo fundo'
-        default: '20000'
+        # 50000 é o teto ÚTIL, não um limite arbitrário: a ~12 s por lote de 3
+        # jogadores, é o tanto que cabe nas 6 h do runner. Pedir mais só faria o
+        # `timeout-minutes` cortar o job no meio — inofensivo, porque a fila é
+        # retomável, mas deixa a execução vermelha sem nada de errado ter
+        # acontecido. Subiu de 20000 junto com o escopo: com 24 ligas o backfill
+        # tem ~13 mil jogadores pela frente, e a noite inteira é bem-vinda.
+        default: '50000'
       ligas:
         description: 'códigos separados por vírgula; vazio = padrão de cada modo'
         default: ''
@@ -74,36 +90,33 @@ jobs:
   espelho:
     runs-on: ubuntu-latest
     timeout-minutes: 350
-    # Sem checkout, sem `npm ci`, sem credenciais do Supabase: desde que a
-    # raspagem passou a acontecer no Oxygen, este job não toca em código nem em
-    # banco — ele só chama dois endpoints do site e conta o que voltou. O `node`
-    # que os laços abaixo usam já vem instalado no runner.
+    # O checkout serve a UMA coisa: ler `leagues.ts` para saber quais ligas
+    # existem. Continua sem `npm ci` e sem credenciais do Supabase — desde que a
+    # raspagem passou a acontecer no Oxygen, este job não toca em banco, só chama
+    # dois endpoints do site e conta o que voltou. O `node` que os laços abaixo
+    # usam já vem instalado no runner.
     env:
       BASE: ${{ vars.SITE_URL || 'https://www.playersplace.com.br' }}
       TOKEN: ${{ secrets.ESPELHO_TOKEN || secrets.AQUECIMENTO_TOKEN }}
       MODO: ${{ inputs.modo || 'ambos' }}
-      ORCAMENTO: ${{ inputs.orcamento || '20000' }}
-      # Agora `raso` e `fundo` têm o MESMO escopo padrão, e não é economia: a
-      # sentinela é quem enche a `jogadores_base`, e a `jogadores_base` é quem
-      # monta a fila do `fundo`. Rasar uma liga que o `fundo` não vai aprofundar
-      # produz linha de base sem espelho — que é justamente o estado que devolve
-      # 502 na página do jogador quando a origem cai. Um escopo só, coberto de
-      # ponta a ponta, vale mais que 24 pela metade.
-      LIGAS_RASO: ${{ inputs.ligas || 'BRA1,BRA2' }}
-      # `fundo` sem filtro seria outra coisa completamente. Medido em
-      # 10/08/2026, a `jogadores_base` tem 125.418 linhas — e só 3.266 delas
-      # são das 24 ligas do registro. O resto entrou por visita avulsa a página
-      # de clube (toda visita grava o elenco em segundo plano), trazendo junto
-      # competições que a plataforma nem lista, como `FIWC`.
+      ORCAMENTO: ${{ inputs.orcamento || '50000' }}
+      # Vazio de propósito, nos dois casos, e o vazio significa coisas
+      # ligeiramente diferentes:
       #
-      # Sem este padrão, o modo `fundo` tentaria raspar 125 mil jogadores × ~10
-      # chaves = 1,25 MILHÃO de requisições ao Transfermarkt: 139 horas de
-      # raspagem contínua, ou dois meses de execuções noturnas. Com BRA1+BRA2 a
-      # fila são ~515 jogadores e o backfill fecha na primeira noite.
+      #  - LIGAS_RASO é preenchido no passo "Resolve o escopo" a partir de
+      #    `leagues.ts`, porque o laço da sentinela chama /api/aquecer uma vez
+      #    por liga e precisa da lista nominal;
+      #  - LIGAS_FUNDO fica vazio mesmo, e aí o laço simplesmente NÃO manda o
+      #    parâmetro `ligas` — quem decide passa a ser o `LIGAS_PADRAO` de
+      #    `api.espelho.tsx`, que também sai de `leagues.ts`.
       #
-      # É exatamente o escopo combinado: raso em tudo, fundo no Brasil. Para
-      # aprofundar outra liga, passe `ligas` no disparo manual.
-      LIGAS_FUNDO: ${{ inputs.ligas || 'BRA1,BRA2' }}
+      # Os dois modos precisam do mesmo escopo, e isso não é simetria estética:
+      # a sentinela é quem enche a `jogadores_base`, e a `jogadores_base` é quem
+      # monta a fila do `fundo`. Rasar uma liga que o `fundo` não aprofunda
+      # produz linha de base sem espelho; aprofundar uma que o `raso` não marca
+      # produz espelho que nunca mais é atualizado.
+      LIGAS_RASO: ${{ inputs.ligas }}
+      LIGAS_FUNDO: ${{ inputs.ligas }}
 
     steps:
       # Sem o token não há como chamar nem um endpoint, e falhar aqui é melhor
@@ -115,11 +128,33 @@ jobs:
             exit 1
           fi
 
+      - uses: actions/checkout@v4
+        if: env.MODO == 'ambos' || env.MODO == 'raso'
+
+      # A lista de ligas sai de `leagues.ts`, do mesmo jeito que no
+      # aquecer-cache.yml: liga nova entra no espelho sozinha, sem ninguém
+      # lembrar de editar este arquivo. Uma lista à mão aqui seria uma segunda
+      # verdade — e a forma de errar seria silenciosa: a liga apareceria no site
+      # e ficaria fora do espelho, ou seja, 502 para os jogadores dela.
+      - name: Resolve o escopo da sentinela
+        if: (env.MODO == 'ambos' || env.MODO == 'raso') && env.LIGAS_RASO == ''
+        run: |
+          node -e "
+            const fs = require('fs');
+            const src = fs.readFileSync('playersplace/app/lib/tm/leagues.ts', 'utf8');
+            const codes = [...src.matchAll(/\{code: '([^']+)'/g)].map(m => m[1]);
+            if (!codes.length) { console.error('nenhuma liga encontrada em leagues.ts'); process.exit(1); }
+            fs.appendFileSync(process.env.GITHUB_ENV, 'LIGAS_RASO=' + codes.join(',') + '\n');
+            console.log(codes.length + ' ligas: ' + codes.join(', '));
+          "
+
       # A sentinela: uma passada por competição, clube e elenco, que é o que
       # enche a `jogadores_base`. Ela roda antes por isso mesmo — é dela que sai
       # a fila do passo seguinte, e é ela que marca QUEM mudou desde ontem.
       #
-      # Vinte clubes por competição, ~5 requisições cada: ~200 no total. O
+      # É ELA que resolve o 502: basta existir a linha na base para a página do
+      # jogador abrir sem depender de raspagem nenhuma. ~20 clubes por
+      # competição, ~5 requisições cada, 24 competições: ~2.400 no total. O
       # endpoint fatia em lotes porque o Worker tem teto de subrequisições por
       # requisição, e devolve `proximo` com o índice de onde continuar.
       - name: Sentinela (raso, pelo Oxygen)
@@ -128,15 +163,21 @@ jobs:
           node -e "
             const base = process.env.BASE;
             const token = process.env.TOKEN;
-            const ligas = (process.env.LIGAS_RASO || 'BRA1,BRA2').split(',').map(s => s.trim()).filter(Boolean);
-            const LOTE = 10;
+            const ligas = (process.env.LIGAS_RASO || '').split(',').map(s => s.trim()).filter(Boolean);
+            // 5, e não 10, desde que os sinais de lesão e de jogo disputado
+            // entraram no /api/aquecer: o custo por clube subiu de ~4 para ~7
+            // subrequisições, e o lote menor mantém a chamada na mesma casa de
+            // antes. São mais chamadas, e chamadas são baratas.
+            const LOTE = 5;
+
+            if (!ligas.length) { console.log('::error::escopo vazio — o passo Resolve o escopo não rodou'); process.exit(1); }
 
             (async () => {
-              let falhas = 0;
+              let falhas = 0, vazias = [];
 
               for (const liga of ligas) {
                 console.log('=== ' + liga);
-                let inicio = 0, clubes = 0, jogadores = 0, recusado = false;
+                let inicio = 0, clubes = 0, jogadores = 0, sujos = 0, recusado = false;
 
                 // O laço termina de um jeito só: o endpoint devolve
                 // \`proximo: null\` quando chegou no fim da lista de clubes.
@@ -161,10 +202,11 @@ jobs:
 
                   clubes += corpo.clubes || 0;
                   jogadores += corpo.jogadores || 0;
+                  sujos += corpo.sujos || 0;
                   for (const e of (corpo.erros || []).slice(0, 3)) console.log('::warning::' + liga + ': ' + e);
                   if ((corpo.expurgadas || []).length) console.log('  expurgadas: ' + corpo.expurgadas.join(', '));
 
-                  console.log('  ' + corpo.de + '–' + corpo.ate + ' de ' + corpo.total + ': ' + (corpo.clubes || 0) + ' clubes, ' + (corpo.jogadores || 0) + ' jogadores (' + (corpo.duracaoMs || 0) + 'ms)');
+                  console.log('  ' + corpo.de + '–' + corpo.ate + ' de ' + corpo.total + ': ' + (corpo.clubes || 0) + ' clubes, ' + (corpo.jogadores || 0) + ' jogadores, ' + (corpo.sujos || 0) + ' marcados (' + (corpo.duracaoMs || 0) + 'ms)');
                   inicio = corpo.proximo;
 
                   // Cada chamada dispara ~50 requisições à origem de uma vez, e
@@ -173,9 +215,13 @@ jobs:
                   if (inicio !== null) await new Promise((s) => setTimeout(s, 2000));
                 }
 
-                console.log(liga + ': ' + clubes + ' clubes, ' + jogadores + ' jogadores na base');
+                // `sujos` é o sinal de que a sentinela está viva: são os
+                // jogadores que entraram na fila de raspagem profunda por lesão
+                // nova ou por o clube ter entrado em campo. Zero durante uma
+                // rodada inteira é sintoma, não silêncio.
+                console.log(liga + ': ' + clubes + ' clubes, ' + jogadores + ' jogadores na base, ' + sujos + ' marcados para atualizar');
 
-                // Zero clube numa competição que tem vinte significa que a
+                // Zero clube numa competição que tem vinte é sinal de que a
                 // origem devolveu outra coisa. Não pode passar como sucesso: a
                 // base ficaria velha em silêncio, e o passo seguinte acharia a
                 // fila vazia e diria que 'o espelho está em dia'.
@@ -184,10 +230,33 @@ jobs:
                 // respondeu 401 ou 5xx, zero clube é CONSEQUÊNCIA disso, e
                 // acusar a origem por cima manda quem lê o log investigar o
                 // Transfermarkt quando o problema é o nosso token.
+                //
+                // ATENÇÃO — POR QUE ISTO NÃO FALHA MAIS NA HORA: com duas ligas,
+                // uma vazia era com certeza um defeito. Com 24, não é: MLS e a
+                // Canadian Premier jogam no calendário do hemisfério norte, e os
+                // turnos de México, Argentina e Peru trocam de código no meio do
+                // ano — no intervalo, a competição existe e não tem elenco
+                // publicado. Falhar por isso pintaria o job de vermelho todas as
+                // noites até alguém parar de olhar, que é o pior desfecho
+                // possível para um alarme. O julgamento passa a ser coletivo,
+                // abaixo: uma liga vazia é notícia, um terço vazio é falha.
                 if (clubes === 0 && !recusado) {
-                  console.log('::error::' + liga + ': nenhum clube gravado — a origem está recusando as requisições');
-                  falhas++;
+                  console.log('::warning::' + liga + ': nenhum clube gravado');
+                  vazias.push(liga);
                 }
+              }
+
+              if (vazias.length) {
+                console.log('----');
+                console.log('sem elenco publicado: ' + vazias.join(', '));
+              }
+
+              // Um terço das competições sem nenhum clube não é entressafra —
+              // é a origem recusando as requisições, e aí o espelho inteiro
+              // parou de ser alimentado.
+              if (vazias.length > ligas.length / 3) {
+                console.log('::error::' + vazias.length + ' de ' + ligas.length + ' competições sem nenhum clube — a origem está recusando as requisições');
+                falhas++;
               }
 
               if (falhas) process.exit(1);
@@ -208,11 +277,13 @@ jobs:
           node -e "
             const base = process.env.BASE;
             const token = process.env.TOKEN;
+            // Vazio é o caso normal: sem o parâmetro, quem decide o escopo é o
+            // LIGAS_PADRAO de api.espelho.tsx — que sai do mesmo leagues.ts.
             const ligas = process.env.LIGAS_FUNDO || '';
             // Orçamento em REQUISIÇÕES ao Transfermarkt, como no script: cada
             // jogador custa ~10, então convertemos para chamadas ao endpoint.
             const LOTE = 3;
-            const teto = Math.max(1, Math.floor(Number(process.env.ORCAMENTO || 20000) / (10 * LOTE)));
+            const teto = Math.max(1, Math.floor(Number(process.env.ORCAMENTO || 50000) / (10 * LOTE)));
 
             if (!token) {
               console.log('::error::cadastre ESPELHO_TOKEN (ou AQUECIMENTO_TOKEN) nos secrets E na storefront do Oxygen');
@@ -256,7 +327,7 @@ jobs:
                   process.exit(1);
                 }
 
-                console.log(chamadas + ': +' + (corpo.completos || 0) + ' completos, ' + (corpo.incompletos || []).length + ' incompletos (' + (corpo.duracaoMs || 0) + 'ms)');
+                console.log(chamadas + ': +' + (corpo.completos || 0) + ' completos, ' + (corpo.incompletos || []).length + ' incompletos · ' + (corpo.atualizacoes || 0) + ' atualização/' + (corpo.backfill || 0) + ' backfill (' + (corpo.duracaoMs || 0) + 'ms)');
 
                 // Espaça as chamadas: cada uma dispara ~30 requisições ao
                 // Transfermarkt de uma vez, e o Worker não impõe ritmo (fazer

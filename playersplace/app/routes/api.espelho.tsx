@@ -42,7 +42,7 @@
  */
 import {getDb} from '~/lib/db';
 import {rasparJogador} from '~/lib/tm/fundo';
-import {findLeague} from '~/lib/tm';
+import {findLeague, LEAGUES} from '~/lib/tm';
 import {lerJogadoresSujos, marcarFundo} from '~/lib/jogadores.server';
 import type {Route} from './+types/api.espelho';
 
@@ -58,8 +58,33 @@ import type {Route} from './+types/api.espelho';
 const LOTE_PADRAO = 3;
 const LOTE_MAX = 6;
 
-/** o escopo combinado da raspagem profunda — ver o README */
-const LIGAS_PADRAO = ['BRA1', 'BRA2'];
+/**
+ * O escopo da raspagem profunda: TODAS as ligas do registro.
+ *
+ * ERA `['BRA1', 'BRA2']`, E ISSO ERA A CAUSA DOS 502.
+ *
+ * A página do jogador devolve 502 num caso só — quando não há linha na
+ * `jogadores_base` E nenhuma chave em nenhuma camada de cache. Com o espelho
+ * cobrindo duas ligas de vinte e quatro, todo jogador de Premier League,
+ * LaLiga, Liga MX ou J1 estava exatamente nesse caso: dependia de a raspagem ao
+ * vivo dar certo naquele instante. Quando o Transfermarkt engasgava — e ele
+ * engasga —, o visitante levava o erro.
+ *
+ * POR QUE DÁ PARA COBRIR TUDO AGORA
+ *
+ * O medo antigo, registrado no `espelho.yml`, era o tamanho da
+ * `jogadores_base`: 125.418 linhas × 10 chaves = 1,25 milhão de requisições.
+ * Mas esse número é da tabela INTEIRA, que acumulou jogadores de competições
+ * que a plataforma nem lista (entram por visita avulsa a página de clube).
+ * Filtrando pelas ligas do registro — que é o que `lerJogadoresSujos` faz — o
+ * conjunto é de outra ordem: ~20 clubes por liga × ~28 jogadores ≈ 13 mil
+ * jogadores, ~134 mil chaves. Algumas noites de backfill, e depois só o que a
+ * sentinela marcar.
+ *
+ * Sai do registro, e não de uma lista à parte, para não haver duas verdades:
+ * liga nova em `leagues.ts` entra no espelho sozinha.
+ */
+const LIGAS_PADRAO = LEAGUES.map((l) => l.code);
 
 /**
  * Aceita os dois nomes de propósito: `AQUECIMENTO_TOKEN` já existe para o
@@ -164,6 +189,12 @@ export async function action({request, context}: Route.ActionArgs) {
     ok: incompletos.length === 0,
     processados: fila.length,
     completos: prontos.length,
+    // De que nível do lote vieram — ver `lerJogadoresSujos`. Serve para ler o
+    // andamento sem consultar o banco: enquanto `backfill` domina, o espelho
+    // ainda está sendo montado; quando ele zera e sobram só `atualizacoes`, o
+    // regime permanente chegou.
+    atualizacoes: fila.filter((j) => !j.novo).length,
+    backfill: fila.filter((j) => j.novo).length,
     incompletos,
     // o job continua enquanto a fila devolver gente; quando ela seca, `fila`
     // volta menor que o limite e não há mais o que pedir
@@ -188,15 +219,38 @@ export async function loader({request, context}: Route.LoaderArgs) {
   }
 
   try {
-    // pede um a mais que o lote para distinguir "acabou" de "ainda tem"
-    const fila = await lerJogadoresSujos(db, {ligas, limite: 50});
+    // As contagens exatas, e não uma amostra: `head: true` traz só o número,
+    // sem uma linha de payload. É o que dá para acompanhar o backfill andando
+    // noite após noite — a amostra de 50 que havia aqui antes não distinguia
+    // "faltam 60" de "faltam 12 mil".
+    const contar = (novos: boolean) => {
+      let q = db
+        .from('jogadores_base')
+        .select('id', {count: 'exact', head: true})
+        .eq('sujo', true);
+      q = novos ? q.is('fundo_em', null) : q.not('fundo_em', 'is', null);
+      return q.in('liga_code', ligas);
+    };
+
+    const [atualizacoes, backfill, amostra] = await Promise.all([
+      contar(false),
+      contar(true),
+      lerJogadoresSujos(db, {ligas, limite: 5}),
+    ]);
+
+    const erros = [atualizacoes.error, backfill.error]
+      .filter((e) => e)
+      .map((e) => e!.message);
+
     return Response.json({
       ligas,
-      naFila: fila.length,
-      // `50` é o teto desta amostra, não o tamanho da fila — dizer "50" seco
-      // faria parecer que falta pouco quando podem faltar milhares
-      amostraCompleta: fila.length < 50,
-      proximos: fila.slice(0, 5).map((j) => ({id: j.id, nome: j.nome})),
+      // os dois níveis da fila, na ordem em que são servidos — ver
+      // `lerJogadoresSujos`. `atualizacoes` nunca espera pelo `backfill`.
+      atualizacoes: atualizacoes.count ?? 0,
+      backfill: backfill.count ?? 0,
+      naFila: (atualizacoes.count ?? 0) + (backfill.count ?? 0),
+      proximos: amostra.map((j) => ({id: j.id, nome: j.nome, novo: j.novo})),
+      ...(erros.length ? {erros} : {}),
     });
   } catch (e) {
     return Response.json({erro: (e as Error).message}, {status: 502});
