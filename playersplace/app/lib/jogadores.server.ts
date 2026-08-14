@@ -554,6 +554,73 @@ export async function marcarSujos(db: Db, ids: string[]): Promise<number> {
   return count ?? 0;
 }
 
+// ---------------------------------------------------------------------------
+// A FILA DE VÍDEOS
+//
+// Parecida com a do espelho, e diferente num ponto que muda tudo: aqui o
+// recurso escasso não é a paciência da origem, é a COTA. A YouTube Data API dá
+// 100 buscas por dia, contra as dezenas de milhares de requisições que o
+// Transfermarkt tolera. Por isso a ordem não é cronológica — é por valor de
+// mercado, o melhor proxy disponível de quem vai ser visitado.
+//
+// Ver `supabase/008_videos.sql` para a conta completa.
+// ---------------------------------------------------------------------------
+
+/** um jogador esperando busca de vídeo */
+export interface JogadorSemVideo {
+  id: string;
+  nome: string;
+  clube: string | null;
+}
+
+/**
+ * Os próximos da fila de vídeo: nunca buscados, dos mais caros para os mais
+ * baratos, restritos às ligas que a plataforma lista.
+ *
+ * O filtro por liga não é detalhe: a `jogadores_base` acumulou dezenas de
+ * milhares de jogadores de competições que a plataforma nem exibe (entram por
+ * visita avulsa a página de clube). Gastar cota com eles seria queimar o
+ * recurso mais escasso do sistema em páginas que ninguém abre.
+ *
+ * Lança em caso de erro, como `lerJogadoresSujos` e pelo mesmo motivo: quem
+ * chama é um job, e fila vazia por falha de banco seria lida como "acabou".
+ */
+export async function lerJogadoresSemVideo(
+  db: Db,
+  opcoes: {ligas: string[]; limite: number},
+): Promise<JogadorSemVideo[]> {
+  const {data, error} = await db
+    .from(TABELA)
+    .select('id, nome, clube_nome')
+    .is('video_em', null)
+    .in('liga_code', opcoes.ligas)
+    .order('valor_num', {ascending: false, nullsFirst: false})
+    .limit(opcoes.limite);
+
+  if (error) throw new Error(`fila de vídeos: ${error.message}`);
+
+  return (data ?? [])
+    .map((l) => l as {id: string; nome: string; clube_nome: string | null})
+    .map((l) => ({id: l.id, nome: l.nome, clube: l.clube_nome}));
+}
+
+/**
+ * Tira da fila quem já teve a busca executada.
+ *
+ * Carimba TAMBÉM quem não achou vídeo nenhum, e isso é o ponto: a busca vazia
+ * custou as mesmas 100 unidades da que achou. Sem o carimbo, os jogadores sem
+ * highlight publicado voltariam todo dia e consumiriam a cota inteira sem
+ * nunca produzir nada — a fila nunca andaria.
+ */
+export async function marcarVideo(db: Db, ids: string[]): Promise<void> {
+  if (!ids.length) return;
+  const {error} = await db
+    .from(TABELA)
+    .update({video_em: new Date().toISOString()})
+    .in('id', ids);
+  if (error) throw new Error(`marcar vídeo: ${error.message}`);
+}
+
 export interface ResumoExecucao {
   liga: string;
   clubes: number;

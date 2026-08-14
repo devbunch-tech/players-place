@@ -1,0 +1,114 @@
+# Vídeos de highlights — preenche a fila dentro da cota do YouTube.
+#
+# POR QUE ESTE JOB É TÃO MENOR QUE O espelho.yml
+#
+# Porque o recurso escasso é outro. O espelho negocia com a paciência do
+# Transfermarkt e faz dezenas de milhares de requisições por noite. Aqui o
+# limite é contratual e pequeno: a YouTube Data API v3 dá **10.000 unidades por
+# dia** e cobra **100 por busca** — cem buscas diárias para a plataforma toda.
+#
+# Por isso este job não tem modo, não tem orçamento configurável e não corre:
+# ele gasta ~90 buscas e vai embora. As 10 restantes ficam para os visitantes
+# reais, que também consomem da mesma cota quando abrem um jogador ainda não
+# preenchido.
+#
+# A CONTA, SEM ILUSÃO
+#
+# ~13 mil jogadores nas 24 ligas ÷ 90 buscas/dia = **~145 dias** para cobrir
+# todo mundo. Isso não é lentidão de implementação, é o teto do plano gratuito.
+#
+# O que salva a experiência muito antes disso é a ORDEM: a fila sai do
+# `lerJogadoresSemVideo`, ordenada por valor de mercado, então os ~500
+# jogadores que concentram quase todas as visitas ficam prontos na primeira
+# semana. O resto é cauda longa, e cauda longa pode esperar.
+#
+# Para acelerar só há um caminho, e ele é externo a este repositório: pedir
+# aumento de cota no console da API do Google. Com 100.000 unidades/dia a
+# cobertura completa cai de cinco meses para duas semanas.
+name: videos
+
+on:
+  schedule:
+    - cron: '0 12 * * *' # 12:00 UTC = 09:00 BRT, depois do aquecimento
+  workflow_dispatch:
+    inputs:
+      buscas:
+        description: 'quantas buscas gastar nesta execução (cota diária: 100)'
+        default: '90'
+
+# Duas execuções ao mesmo tempo gastariam cota em dobro e provavelmente
+# levariam 429 — que aqui é caro, porque a tentativa também é cobrada.
+concurrency:
+  group: videos
+  cancel-in-progress: false
+
+jobs:
+  videos:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      BASE: ${{ vars.SITE_URL || 'https://www.playersplace.com.br' }}
+      TOKEN: ${{ secrets.ESPELHO_TOKEN || secrets.AQUECIMENTO_TOKEN }}
+      BUSCAS: ${{ inputs.buscas || '90' }}
+
+    steps:
+      - name: Confere o token
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::cadastre ESPELHO_TOKEN (ou AQUECIMENTO_TOKEN) nos secrets do repositório E nas variáveis de ambiente da storefront no Oxygen"
+            exit 1
+          fi
+
+      - name: Preenche a fila de vídeos
+        run: |
+          node -e "
+            const base = process.env.BASE;
+            const token = process.env.TOKEN;
+            const LOTE = 10;
+            const teto = Math.max(1, Math.ceil(Number(process.env.BUSCAS || 90) / LOTE));
+
+            (async () => {
+              let chamadas = 0, comVideo = 0, semVideo = 0;
+
+              while (chamadas < teto) {
+                const r = await fetch(base + '/api/videos?limite=' + LOTE, {
+                  method: 'POST',
+                  headers: {'x-espelho-token': token},
+                }).catch((e) => ({ok: false, status: 0, erro: e.message}));
+
+                const corpo = r.json ? await r.json().catch(() => ({})) : {};
+                chamadas++;
+
+                if (!r.ok) {
+                  console.log('::error::/api/videos respondeu ' + (r.status || 'erro de rede') + ' ' + JSON.stringify(corpo));
+                  if (r.status === 503) {
+                    console.log('::error::503 aqui costuma ser a YOUTUBE_API_KEY ausente nas variáveis da storefront no Oxygen');
+                  }
+                  process.exit(1);
+                }
+
+                comVideo += corpo.comVideo || 0;
+                semVideo += corpo.semVideo || 0;
+
+                console.log(chamadas + ': +' + (corpo.comVideo || 0) + ' com vídeo, ' + (corpo.semVideo || 0) + ' sem (' + (corpo.duracaoMs || 0) + 'ms)');
+
+                if (!corpo.proximo) { console.log('fila vazia — todos os jogadores já foram buscados'); break; }
+
+                // Espaça as chamadas: a API do YouTube responde 429 a rajadas
+                // com a mesma chave, e um 429 aqui gasta cota sem trazer nada.
+                await new Promise((s) => setTimeout(s, 2000));
+              }
+
+              console.log('----');
+              console.log('buscas gastas: ~' + (comVideo + semVideo) + ' · com vídeo: ' + comVideo + ' · sem vídeo: ' + semVideo);
+
+              // Nada com vídeo em toda a execução é sintoma: chave inválida,
+              // cota já esgotada por visitantes, ou a busca parou de casar.
+              // Não pode passar como sucesso — é o tipo de falha que fica meses
+              // sem ser notada porque a página degrada em silêncio.
+              if (comVideo + semVideo > 0 && comVideo === 0) {
+                console.log('::error::nenhum vídeo encontrado em ' + (comVideo + semVideo) + ' buscas — verifique a cota e a YOUTUBE_API_KEY');
+                process.exit(1);
+              }
+            })();
+          "

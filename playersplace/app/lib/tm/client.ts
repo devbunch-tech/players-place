@@ -327,6 +327,40 @@ async function hashDoValor(valor: unknown): Promise<string> {
  */
 const TETO_VALIDADE = 7 * 24 * 3600;
 
+/**
+ * Teto das chaves de vídeo do YouTube — 180 dias, e não é exagero.
+ *
+ * O TETO DE UMA SEMANA ERA UM VAZAMENTO DE COTA
+ *
+ * A YouTube Data API dá 10.000 unidades por dia e cobra 100 por busca: são
+ * **100 buscas diárias**, para a plataforma inteira. Com o teto de 7 dias, toda
+ * visita a uma página de jogador cuja chave `yt:` tivesse passado da validade
+ * disparava uma revalidação em segundo plano — 100 unidades. Espalhado pelos
+ * milhares de jogadores da plataforma, o tráfego normal de visitantes esgota a
+ * cota antes do meio-dia, e a partir daí TODO MUNDO cai no botão de busca,
+ * inclusive nas páginas que já tinham vídeo.
+ *
+ * O caso é diferente do resto do cache: a chave do Transfermarkt quer ser
+ * conferida com frequência porque o dado muda toda rodada. Um vídeo de
+ * highlights não — ele é escolhido uma vez e continua servindo. Reconferir
+ * semanalmente gasta o recurso escasso para, quase sempre, gravar o mesmo id.
+ *
+ * 180 dias mantém a chave no radar (nada sai de vez) a um custo sustentável:
+ * ~13 mil jogadores ÷ 180 dias ≈ 72 buscas/dia, que cabe nas 100.
+ */
+const TETO_VIDEO = 180 * 24 * 3600;
+
+/**
+ * O teto de validade adaptativa desta chave.
+ *
+ * Por prefixo, e não por parâmetro em `cached()`, de propósito: o teto é
+ * política de um TIPO de dado, não decisão de quem chama. Espalhá-lo pelas
+ * chamadas abriria espaço para dois getters da mesma família divergirem.
+ */
+function tetoDaChave(chave: string): number {
+  return chave.startsWith('yt:') ? TETO_VIDEO : TETO_VALIDADE;
+}
+
 interface DoBanco<T> {
   valor: T;
   salvoEm: number;
@@ -397,7 +431,7 @@ async function gravarNoBanco(
       p_payload: {v: valor ?? null},
       p_hash: await hashDoValor(valor),
       p_ttl_s: Math.round(ttlSeconds),
-      p_teto_s: TETO_VALIDADE,
+      p_teto_s: tetoDaChave(chave),
     });
 
     // A função é da migração 006. Enquanto ela não for aplicada — ou nos
