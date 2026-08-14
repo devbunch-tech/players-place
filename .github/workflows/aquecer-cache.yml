@@ -101,7 +101,14 @@ jobs:
       - name: Materializa os elencos
         env:
           BASE: ${{ vars.SITE_URL }}
-          TOKEN: ${{ secrets.AQUECIMENTO_TOKEN }}
+          # Os DOIS nomes, na mesma ordem do espelho.yml. Aqui estava só
+          # `AQUECIMENTO_TOKEN`, e o repositório tem cadastrado apenas o
+          # `ESPELHO_TOKEN` — então este passo se auto-pulava toda noite com um
+          # `::notice::` que ninguém lê, e a `jogadores_base` deixou de ser
+          # alimentada por job desde 10/08/2026 sem uma única execução vermelha.
+          # A mesma assimetria já tinha custado uma execução do outro lado, e
+          # está anotada em `autorizado()` no api.aquecer.tsx.
+          TOKEN: ${{ secrets.ESPELHO_TOKEN || secrets.AQUECIMENTO_TOKEN }}
         run: |
           node -e "
             const fs = require('fs');
