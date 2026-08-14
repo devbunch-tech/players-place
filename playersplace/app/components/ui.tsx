@@ -418,6 +418,38 @@ export function Skeleton({
 }
 
 /** embrulho comum: título de seção real + corpo em esqueleto */
+/**
+ * A seção que não deu para carregar — sem levar a página junto.
+ *
+ * POR QUE ELA EXISTE
+ *
+ * A página do jogador é montada por streaming: o topo sai na hora e cada painel
+ * desce quando sua raspagem resolve. O problema é o que acontecia quando uma
+ * delas falhava DEPOIS que o HTML já começou a ser enviado — os cabeçalhos já
+ * foram, o status já é 200, e o React Router não tem escolha senão renderizar o
+ * ErrorBoundary da rota no cliente. Resultado: a página inteira, já lida pelo
+ * visitante, era substituída por um "500 Unexpected Server Error".
+ *
+ * Perder um painel de lesões é aborrecido; perder a página que a pessoa está
+ * lendo, por causa dele, é inaceitável. Passada como `errorElement` de cada
+ * `<Await>`, esta seção mantém o estrago dentro do painel que falhou.
+ *
+ * O tom da mensagem é deliberado: "agora" e "alguns minutos" dizem que é
+ * transitório e que vale voltar — porque quase sempre é (a origem oscila).
+ * Nada de "erro", que soa como defeito da plataforma e não convida a tentar.
+ */
+export function SecaoIndisponivel({titulo}: {titulo?: string}) {
+  return (
+    <section role="status" aria-live="polite">
+      {titulo ? <SectionTitle>{titulo}</SectionTitle> : null}
+      <p className="rounded-card border border-line bg-card px-4 py-6 text-center text-sm text-muted">
+        O conteúdo não pode ser carregado agora. Tente novamente em alguns
+        minutos.
+      </p>
+    </section>
+  );
+}
+
 export function SkeletonSecao({
   titulo,
   children,

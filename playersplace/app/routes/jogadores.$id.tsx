@@ -43,6 +43,7 @@ import {
   Avatar,
   BackLink,
   DadosSalvos,
+  SecaoIndisponivel,
   SectionTitle,
   Skeleton,
   SkeletonBloco,
@@ -209,10 +210,18 @@ export async function loader({params, context}: Route.LoaderArgs) {
   // O `.catch()` em cada uma não é opcional: promessa rejeitada sem tratamento
   // atravessa o streaming e derruba a rota inteira, em vez de esvaziar só o
   // painel que falhou.
+  //
+  // E ELE PRECISA SER O ÚLTIMO ELO DA CORRENTE. Aqui o `.catch()` vinha ANTES
+  // do `.then()`, o que só protege a raspagem: se a transformação seguinte
+  // lançasse, a promessa resultante rejeitava sem ninguém escutando — e o
+  // estrago era o pior possível, porque acontece DEPOIS que o HTML começou a
+  // ser enviado. Com os cabeçalhos já na rede, não dá para trocar o status:
+  // o React Router renderiza o ErrorBoundary da rota no cliente e a página que
+  // o visitante já estava lendo é substituída por um 500.
   const fichaPromise = getPlayerRegistro(id).catch(() => null);
   const transfersPromise = getPlayerTransfers(id)
-    .catch(() => [])
-    .then((t) => t.slice(0, 14));
+    .then((t) => t.slice(0, 14))
+    .catch(() => []);
   const performancePromise = getPlayerPerformance(id).catch(() => []);
   const careerPromise = getPlayerCareer(id).catch(() => null);
   const nationalPromise = getPlayerNationalCareer(id).catch(() => []);
@@ -223,7 +232,6 @@ export async function loader({params, context}: Route.LoaderArgs) {
   // o gráfico e os números derivados dele viajam juntos: a conta é do
   // servidor, e mandar `list` cru obrigaria o componente a refazê-la
   const mvPromise = getPlayerMarketValueGraph(id)
-    .catch(() => null)
     .then((mv) => {
       // variação percentual entre os dois últimos pontos do histórico
       let delta: number | null = null;
@@ -241,7 +249,10 @@ export async function loader({params, context}: Route.LoaderArgs) {
           club: p.verein,
         })) ?? [];
       return {mv, points, delta};
-    });
+    })
+    // por último, e cobrindo a conta acima também: a forma devolvida é a mesma
+    // que o painel espera, então ele cai no número da base sem saber de nada
+    .catch(() => ({mv: null, points: [], delta: null}));
 
   // ÚNICO await do caminho feliz
   const base = await lerJogadorBase(getDb(context.env), id);
@@ -407,7 +418,14 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
           raspagem. Sem fallback de propósito: um esqueleto aqui reservaria
           espaço para um aviso que, na maioria das vezes, não existe. */}
       <Suspense fallback={null}>
-        <Await resolve={absence}>{(a) => <InjuryStatus absence={a} />}</Await>
+        {/* Fragmento vazio, e não `SecaoIndisponivel`: este bloco é um aviso
+            que na maioria das páginas não existe. Anunciar "não consegui
+            carregar o aviso de lesão" cria preocupação onde provavelmente não
+            havia nada a dizer. O que ele não pode fazer é derrubar a página —
+            e é disso que o errorElement cuida. */}
+        <Await resolve={absence} errorElement={<></>}>
+          {(a) => <InjuryStatus absence={a} />}
+        </Await>
       </Suspense>
 
       {/* min-w-0 nas colunas: sem isso o min-content das tabelas largas
@@ -418,7 +436,13 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
               esqueleto: só o gráfico e as legendas entram depois. */}
           <section className="rounded-card bg-pitch p-5 text-white">
             <Suspense fallback={<ValorDeMercado valor={topo.valor} />}>
-              <Await resolve={valorizacao}>
+              {/* Mesmo componente do fallback: o número grande vem da base e
+                  continua correto sem o gráfico. Uma mensagem de erro aqui
+                  esconderia o dado principal, que não falhou. */}
+              <Await
+                resolve={valorizacao}
+                errorElement={<ValorDeMercado valor={topo.valor} />}
+              >
                 {({mv, points, delta}) => (
                   <ValorDeMercado
                     valor={mv?.current ?? topo.valor}
@@ -436,7 +460,10 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
               <SkeletonTabela titulo="Desempenho" linhas={5} colunas={7} />
             }
           >
-            <Await resolve={performance}>
+            <Await
+              resolve={performance}
+              errorElement={<SecaoIndisponivel titulo="Desempenho" />}
+            >
               {(seasons) =>
                 seasons.length > 0 ? (
                   <PerformancePanel
@@ -453,7 +480,10 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
               <SkeletonTabela titulo="Titularidades" linhas={4} colunas={4} />
             }
           >
-            <Await resolve={starts}>
+            <Await
+              resolve={starts}
+              errorElement={<SecaoIndisponivel titulo="Titularidades" />}
+            >
               {(rows) => (rows.length > 0 ? <StartsPanel rows={rows} /> : null)}
             </Await>
           </Suspense>
@@ -467,7 +497,10 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
               />
             }
           >
-            <Await resolve={injuries}>
+            <Await
+              resolve={injuries}
+              errorElement={<SecaoIndisponivel titulo="Histórico de lesões" />}
+            >
               {(rows) => <InjuryHistory rows={rows} />}
             </Await>
           </Suspense>
@@ -475,7 +508,10 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
           <Suspense
             fallback={<SkeletonTabela titulo="Jogos" linhas={8} colunas={6} />}
           >
-            <Await resolve={gameLog}>
+            <Await
+              resolve={gameLog}
+              errorElement={<SecaoIndisponivel titulo="Jogos" />}
+            >
               {(log) =>
                 log?.seasons.length ? <MatchLog seasons={log.seasons} /> : null
               }
@@ -487,7 +523,10 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
               <SkeletonTabela titulo="Carreira" linhas={4} colunas={6} />
             }
           >
-            <Await resolve={career}>
+            <Await
+              resolve={career}
+              errorElement={<SecaoIndisponivel titulo="Carreira" />}
+            >
               {(c) =>
                 c ? (
                   <CareerTotalsTable career={c} isGoalkeeper={topo.goleiro} />
@@ -501,7 +540,10 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
               <SkeletonBloco titulo="Melhores momentos" altura="h-56" />
             }
           >
-            <Await resolve={highlight}>
+            <Await
+              resolve={highlight}
+              errorElement={<Highlights video={null} playerName={topo.nome} />}
+            >
               {(v) => <Highlights video={v} playerName={topo.nome} />}
             </Await>
           </Suspense>
@@ -513,7 +555,12 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
               <SkeletonLista titulo="Histórico de transferências" linhas={5} />
             }
           >
-            <Await resolve={transfers}>
+            <Await
+              resolve={transfers}
+              errorElement={
+                <SecaoIndisponivel titulo="Histórico de transferências" />
+              }
+            >
               {(rows) =>
                 rows.length > 0 ? <Transferencias rows={rows} /> : null
               }
@@ -526,7 +573,7 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
               página do jogador no Transfermarkt — a base não a tem. O que a
               base tem já preenche o esqueleto abaixo com dado de verdade. */}
           <Suspense fallback={<FichaParcial topo={topo} />}>
-            <Await resolve={ficha}>
+            <Await resolve={ficha} errorElement={<FichaParcial topo={topo} />}>
               {(registro) =>
                 registro?.valor ? (
                   <Ficha info={registro.valor.info} />
@@ -538,7 +585,10 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
           </Suspense>
 
           <Suspense fallback={<SkeletonCartao titulo="Posições" linhas={3} />}>
-            <Await resolve={gameLog}>
+            <Await
+              resolve={gameLog}
+              errorElement={<SecaoIndisponivel titulo="Posições" />}
+            >
               {(log) =>
                 log?.positions.length ? (
                   <PositionsPitch
@@ -555,7 +605,10 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
           <Suspense
             fallback={<SkeletonCartao titulo="Carreira por clube" linhas={4} />}
           >
-            <Await resolve={career}>
+            <Await
+              resolve={career}
+              errorElement={<SecaoIndisponivel titulo="Carreira por clube" />}
+            >
               {(c) =>
                 c?.clubs.length ? <CareerByClub rows={c.clubs} /> : null
               }
@@ -563,7 +616,10 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
           </Suspense>
 
           <Suspense fallback={<SkeletonCartao titulo="Seleção" linhas={3} />}>
-            <Await resolve={national}>
+            <Await
+              resolve={national}
+              errorElement={<SecaoIndisponivel titulo="Seleção" />}
+            >
               {(rows) =>
                 rows.length > 0 ? <NationalTeamCareer rows={rows} /> : null
               }

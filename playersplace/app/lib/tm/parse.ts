@@ -195,11 +195,43 @@ export function parseClub(html: string): ClubProfile {
   const root = parse(html);
   const name = clean(root.querySelector('.data-header__headline-wrapper')?.text);
   const crest = img(root.querySelector('.data-header__profile-container img'));
+  // O SEGUNDO SELETOR PRECISA FICAR DENTRO DO CABEÇALHO.
+  //
+  // Ele existe porque nem toda página de clube põe o link da competição em
+  // `.data-header__club`. Mas buscando a partir de `root` ele varria a PÁGINA
+  // INTEIRA e devolvia o primeiro link de competição que encontrasse — menu,
+  // rodapé, bloco lateral, tanto faz. O resultado, medido em 14/08/2026 na
+  // `jogadores_base`: 118.463 jogadores e 10.282 clubes distintos carimbados
+  // com um único código genérico (`FIWC`), 94% da tabela.
+  //
+  // Nenhuma competição de clubes tem 10 mil clubes; o número sozinho já
+  // denuncia que não era o link do clube. Restringir ao cabeçalho preserva a
+  // intenção do fallback e mata a varredura cega.
+  //
+  // Quando nem no cabeçalho existe, `leagueCode` fica null — e null é
+  // honesto: diz "não sei em que competição este clube está", que é
+  // verdade, em vez de afirmar uma competição errada.
+  const header = root.querySelector('.data-header') ?? root;
   const leagueLink =
-    root.querySelector('.data-header__club a[href*="/wettbewerb/"]') ??
-    root.querySelector('a[href*="/startseite/wettbewerb/"]');
+    header.querySelector('.data-header__club a[href*="/wettbewerb/"]') ??
+    header.querySelector('a[href*="/startseite/wettbewerb/"]');
+  // `[A-Za-z0-9]`, e não `[A-Z0-9]`: os códigos do Transfermarkt NÃO são todos
+  // maiúsculos. O Peru é `TDeC`, e a classe só-maiúscula casava `TD` e parava
+  // no `e` minúsculo — gravando um código que não existe.
+  //
+  // O estrago não era visível na página: ela usa `findLeague`, que não acha
+  // `TD` e simplesmente não mostra a competição. O estrago é na
+  // `jogadores_base`, onde `gravarElencoBase` guarda esse código em
+  // `liga_code`. Como as filas do espelho e dos vídeos selecionam por
+  // `liga_code in (<registro>)`, todo jogador do Peru ficava invisível para as
+  // duas — nunca espelhado, nunca com vídeo, e por isso mesmo o candidato
+  // perfeito ao 502.
+  //
+  // A extração da linha ~458 sempre foi assim; esta ficou para trás. Duas
+  // grafias da mesma coisa é o bastante para o bug existir em uma delas.
   const leagueCode =
-    leagueLink?.getAttribute('href')?.match(/wettbewerb\/([A-Z0-9]+)/)?.[1] ?? null;
+    leagueLink?.getAttribute('href')?.match(/wettbewerb\/([A-Za-z0-9]+)/)?.[1] ??
+    null;
   const totalValue = clean(root.querySelector('.data-header__market-value-wrapper')?.text)
     .replace(/Valor de mercado total.*/i, '')
     .trim();
