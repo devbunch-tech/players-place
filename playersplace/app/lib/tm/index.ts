@@ -1565,10 +1565,18 @@ export interface MarketList {
   countries: {id: string; name: string}[];
   /** nacionalidade em uso (id de país do Transfermarkt) ou null */
   country: string | null;
+  /** posições disponíveis no filtro desta lista */
+  positions: {id: string; name: string}[];
+  /** posição em uso (id de posição do Transfermarkt) ou null */
+  position: string | null;
 }
 
 /** id de país do TM; qualquer outra coisa vira "sem filtro" */
 const landId = (v: string | null | undefined): string | null =>
+  v && /^\d+$/.test(v) ? v : null;
+
+/** id de posição do TM (inclui os agrupamentos 98/99); resto vira "sem filtro" */
+const positionId = (v: string | null | undefined): string | null =>
   v && /^\d+$/.test(v) ? v : null;
 
 /** uma página da origem, do jeito que o Transfermarkt a pagina */
@@ -1576,18 +1584,20 @@ function sourcePage(
   path: string,
   n: number,
   country: string | null,
+  position: string | null,
 ): Promise<MarketPlayerPage> {
   const qs = new URLSearchParams();
   if (country) qs.set('land_id', country);
+  if (position) qs.set('spielerposition_id', position);
   if (n > 1) qs.set('page', String(n));
   const query = qs.toString();
-  // as opções de país só interessam na página 1 — parsear em todas inflaria
-  // o cache com as ~250 nacionalidades repetidas em cada entrada
-  return cached(`market:${path}:${country ?? ''}:${n}`, 6 * HOUR, async () =>
-    parseMarketPlayers(
-      await tmHtml(query ? `${path}?${query}` : path),
-      n === 1,
-    ),
+  // as opções de país e de posição só interessam na página 1 — parsear em
+  // todas inflaria o cache com as ~250 nacionalidades repetidas em cada entrada
+  return cached(
+    `market:${path}:${country ?? ''}:${position ?? ''}:${n}`,
+    6 * HOUR,
+    async () =>
+      parseMarketPlayers(await tmHtml(query ? `${path}?${query}` : path), n === 1),
   );
 }
 
@@ -1605,10 +1615,12 @@ async function marketList(
   path: string,
   page: number,
   nationality?: string | null,
+  pos?: string | null,
 ): Promise<MarketList> {
   const country = landId(nationality);
-  const first = await sourcePage(path, 1, country);
-  const {countries} = first;
+  const position = positionId(pos);
+  const first = await sourcePage(path, 1, country, position);
+  const {countries, positions} = first;
   const size = first.rows.length;
   if (!size) {
     return {
@@ -1618,6 +1630,8 @@ async function marketList(
       title: first.title,
       countries,
       country,
+      positions,
+      position,
     };
   }
 
@@ -1633,7 +1647,7 @@ async function marketList(
     Array.from({length: to - from + 1}, (_, i) =>
       from + i === 1
         ? Promise.resolve(first)
-        : sourcePage(path, from + i, country),
+        : sourcePage(path, from + i, country, position),
     ),
   );
   const offset = start - (from - 1) * size;
@@ -1641,7 +1655,16 @@ async function marketList(
     .flatMap((sp) => sp.rows)
     .slice(offset, offset + MARKET_PER_PAGE);
 
-  return {rows, page: p, totalPages, title: first.title, countries, country};
+  return {
+    rows,
+    page: p,
+    totalPages,
+    title: first.title,
+    countries,
+    country,
+    positions,
+    position,
+  };
 }
 
 /** clubes ligados a um jogador nos rumores abertos do Transfermarkt */
@@ -1684,6 +1707,12 @@ export async function getExpiringContracts(
 export function getFreeAgents(
   page = 1,
   nationality?: string | null,
+  position?: string | null,
 ): Promise<MarketList> {
-  return marketList('/statistik/vertragslosespieler', page, nationality);
+  return marketList(
+    '/statistik/vertragslosespieler',
+    page,
+    nationality,
+    position,
+  );
 }

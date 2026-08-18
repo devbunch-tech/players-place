@@ -84,12 +84,13 @@ export async function loader({request}: Route.LoaderArgs) {
   const tab: Tab = isTab(raw) ? raw : 'ultimas';
   const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
   const nac = url.searchParams.get('nac');
+  const pos = url.searchParams.get('pos');
 
   if (tab === 'contratos' || tab === 'livres') {
     const market = await (
       tab === 'contratos'
         ? getExpiringContracts(page, nac)
-        : getFreeAgents(page, nac)
+        : getFreeAgents(page, nac, pos)
     ).catch(() => null);
     return {tab, transfers: [], market};
   }
@@ -143,13 +144,19 @@ export default function Transferencias({loaderData}: Route.ComponentProps) {
               <p className="text-[13px] font-semibold text-faint">
                 {market.title}
               </p>
-              <NationalityFilter tab={tab} list={market} />
+              <div className="flex flex-wrap items-center gap-3">
+                {/* a origem só oferece o filtro de posição na lista de livres */}
+                {tab === 'livres' ? (
+                  <PositionFilter tab={tab} list={market} />
+                ) : null}
+                <NationalityFilter tab={tab} list={market} />
+              </div>
             </div>
           ) : null}
 
           {isMarket && market && !market.rows.length ? (
             <EmptyNote>
-              Nenhum jogador encontrado com essa nacionalidade.
+              Nenhum jogador encontrado com esses filtros.
             </EmptyNote>
           ) : empty ? (
             <EmptyNote>
@@ -225,6 +232,10 @@ function NationalityFilter({tab, list}: {tab: Tab; list: MarketList}) {
   return (
     <Form method="get" className="flex items-center gap-2">
       <input type="hidden" name="tab" value={tab} />
+      {/* trocar de país não pode derrubar a posição já escolhida */}
+      {list.position ? (
+        <input type="hidden" name="pos" value={list.position} />
+      ) : null}
       <label htmlFor="nac" className="text-[13px] font-semibold text-muted">
         Nacionalidade
       </label>
@@ -240,6 +251,42 @@ function NationalityFilter({tab, list}: {tab: Tab; list: MarketList}) {
         {list.countries.map((c) => (
           <option key={c.id} value={c.id}>
             {c.name}
+          </option>
+        ))}
+      </select>
+    </Form>
+  );
+}
+
+/**
+ * As posições também vêm do `select` da página de origem (a "posição
+ * detalhada"), então a lista acompanha o que o Transfermarkt oferece — inclusive
+ * os agrupamentos dele, "Laterais" e "Extremos".
+ */
+function PositionFilter({tab, list}: {tab: Tab; list: MarketList}) {
+  const submit = useSubmit();
+  if (!list.positions.length) return null;
+  return (
+    <Form method="get" className="flex items-center gap-2">
+      <input type="hidden" name="tab" value={tab} />
+      {list.country ? (
+        <input type="hidden" name="nac" value={list.country} />
+      ) : null}
+      {/* sem `page`: trocar de posição sempre volta para a primeira página */}
+      <label htmlFor="pos" className="text-[13px] font-semibold text-muted">
+        Posição
+      </label>
+      <select
+        id="pos"
+        name="pos"
+        defaultValue={list.position ?? ''}
+        onChange={(e) => void submit(e.currentTarget.form)}
+        className="h-10 max-w-[210px] rounded-btn border border-line bg-paper px-3 text-sm font-semibold"
+      >
+        <option value="">Todas</option>
+        {list.positions.map((p) => (
+          <option key={p.id} value={p.id}>
+            {p.name}
           </option>
         ))}
       </select>
@@ -291,6 +338,7 @@ function MarketTable({list, tab}: {list: MarketList; tab: Tab}) {
   const query = (p: number) => {
     const qs = new URLSearchParams({tab});
     if (list.country) qs.set('nac', list.country);
+    if (list.position) qs.set('pos', list.position);
     if (p > 1) qs.set('page', String(p));
     return `/transferencias?${qs.toString()}`;
   };

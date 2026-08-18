@@ -3,7 +3,9 @@ import {Form, Link, NavLink, useLocation} from 'react-router';
 
 const NAV = [
   {to: '/', label: 'Início'},
-  {to: '/fantasy', label: 'Game Fantasy'},
+  // Game Fantasy fora do menu por ora — a rota /fantasy continua no ar, é só
+  // devolver esta linha para o item voltar ao cabeçalho e ao menu mobile.
+  // {to: '/fantasy', label: 'Game Fantasy'},
   {to: '/transferencias', label: 'Transferências'},
   {to: '/valores', label: 'Valores'},
   {to: '/competicoes', label: 'Competições'},

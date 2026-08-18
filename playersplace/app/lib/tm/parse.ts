@@ -433,6 +433,8 @@ export interface MarketPlayerPage {
   lastPage: number;
   /** opções do filtro de nacionalidade (só lidas quando pedidas) */
   countries: {id: string; name: string}[];
+  /** opções do filtro de posição (só lidas quando pedidas) */
+  positions: {id: string; name: string}[];
 }
 
 /** remove acentos e caixa para casar rótulos de coluna do TM */
@@ -525,6 +527,7 @@ export function parseMarketPlayers(
     title: clean(root.querySelector('h1')?.text || root.querySelector('h2')?.text),
     lastPage: parsePagerLastPage(root),
     countries: withFilters ? parseCountryOptions(root) : [],
+    positions: withFilters ? parsePositionOptions(root) : [],
   };
 }
 
@@ -541,6 +544,30 @@ function parseCountryOptions(root: HTMLElement): {id: string; name: string}[] {
     const id = clean(o.getAttribute('value'));
     const name = clean(o.text);
     if (!name || !/^\d+$/.test(id) || id === '0' || seen.has(id)) continue;
+    seen.add(id);
+    out.push({id, name});
+  }
+  return out;
+}
+
+/**
+ * Opções do `select[name=spielerposition_id]` — a "posição detalhada" do
+ * formulário de filtros. Só entram ids numéricos: o "alle" (todas) é a nossa
+ * opção vazia, e é desenhada pela página.
+ *
+ * A lista inclui os agrupamentos que o próprio TM oferece (98 "Laterais",
+ * 99 "Extremos"), porque são valores válidos do mesmo parâmetro — filtrar por
+ * eles funciona igual a filtrar por uma posição isolada.
+ */
+function parsePositionOptions(root: HTMLElement): {id: string; name: string}[] {
+  const seen = new Set<string>();
+  const out: {id: string; name: string}[] = [];
+  for (const o of root.querySelectorAll(
+    'select[name="spielerposition_id"] option',
+  )) {
+    const id = clean(o.getAttribute('value'));
+    const name = clean(o.text);
+    if (!name || !/^\d+$/.test(id) || seen.has(id)) continue;
     seen.add(id);
     out.push({id, name});
   }
