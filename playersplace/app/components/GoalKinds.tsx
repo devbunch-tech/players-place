@@ -21,8 +21,14 @@
  * números redondos e falsos. Eles ficam numa coluna própria, que é ao mesmo
  * tempo o dado e a margem de erro das outras quatro.
  */
+import {useState} from 'react';
 import {Link} from 'react-router';
-import {clubCrest, type PlayerGoalKinds, type GoalKinds} from '~/lib/tm';
+import {
+  clubCrest,
+  type PlayerGoalKinds,
+  type GoalKinds,
+  type SeasonGoalKinds,
+} from '~/lib/tm';
 import {Crest, SectionTitle, StatTile} from '~/components/ui';
 
 /**
@@ -41,20 +47,82 @@ const CELULA = 'px-3 py-2.5 text-center';
 /** zero vira "—": a coluna cheia de zeros esconde os números que importam */
 const num = (n: number) => (n > 0 ? String(n) : '—');
 
+/**
+ * Soma as linhas visíveis.
+ *
+ * Uma temporada pode ter mais de uma linha — quem trocou de clube no meio do
+ * ano aparece uma vez por camisa —, então o filtro de temporada não pode
+ * simplesmente pegar "a linha daquele ano": ele soma as que sobraram.
+ */
+function somar(linhas: SeasonGoalKinds[]): GoalKinds {
+  return linhas.reduce<GoalKinds>(
+    (a, r) => ({
+      rightFoot: a.rightFoot + r.rightFoot,
+      leftFoot: a.leftFoot + r.leftFoot,
+      head: a.head + r.head,
+      penalty: a.penalty + r.penalty,
+      other: a.other + r.other,
+      total: a.total + r.total,
+    }),
+    {rightFoot: 0, leftFoot: 0, head: 0, penalty: 0, other: 0, total: 0},
+  );
+}
+
 export function GoalKindsPanel({data}: {data: PlayerGoalKinds}) {
   const {total, seasons} = data;
+  // `null` é a carreira inteira, e é o estado inicial: o repertório de um
+  // jogador é o acumulado, e a temporada é o recorte que se pede depois
+  const [temporada, setTemporada] = useState<string | null>(null);
   if (!total.total) return null;
 
+  // as temporadas na ordem em que a tabela já as mostra, sem repetir quem
+  // jogou por dois clubes no mesmo ano
+  const rotulos = [...new Set(seasons.map((s) => s.season))];
+  // temporada que sumiu (dado novo, estado velho) volta a valer como carreira
+  const filtro = temporada && rotulos.includes(temporada) ? temporada : null;
+  const visiveis = filtro
+    ? seasons.filter((s) => s.season === filtro)
+    : seasons;
+  const somas = filtro ? somar(visiveis) : total;
+
   const tile = (label: string, valor: number) => {
-    const p = pct(valor, total.total);
+    const p = pct(valor, somas.total);
     return (
       <StatTile label={label} value={p ? `${valor} · ${p}` : String(valor)} />
     );
   };
 
+  const chip = (rotulo: string | null, texto: string) => (
+    <button
+      key={rotulo ?? 'carreira'}
+      type="button"
+      onClick={() => setTemporada(rotulo)}
+      className={`h-8 shrink-0 rounded-full px-3 text-xs font-bold whitespace-nowrap transition-colors tabular-nums ${
+        rotulo === filtro
+          ? 'bg-ink text-white'
+          : 'border border-line bg-card text-muted hover:bg-hoverrow'
+      }`}
+    >
+      {texto}
+    </button>
+  );
+
   return (
     <section>
-      <SectionTitle>Como ele faz os gols</SectionTitle>
+      <SectionTitle
+        action={
+          // uma temporada só não é filtro nenhum — os chips seriam dois botões
+          // dizendo a mesma coisa
+          rotulos.length > 1 ? (
+            <div className="flex gap-1.5 overflow-x-auto">
+              {chip(null, 'Carreira')}
+              {rotulos.map((r) => chip(r, r))}
+            </div>
+          ) : null
+        }
+      >
+        Como ele faz os gols
+      </SectionTitle>
 
       <p className="mb-3 text-[13px] text-muted">
         Cada gol entra em uma categoria só. Pênalti fica fora das pernas — o
@@ -62,10 +130,10 @@ export function GoalKindsPanel({data}: {data: PlayerGoalKinds}) {
       </p>
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        {tile('Pé direito', total.rightFoot)}
-        {tile('Pé esquerdo', total.leftFoot)}
-        {tile('Cabeça', total.head)}
-        {tile('Pênalti', total.penalty)}
+        {tile('Pé direito', somas.rightFoot)}
+        {tile('Pé esquerdo', somas.leftFoot)}
+        {tile('Cabeça', somas.head)}
+        {tile('Pênalti', somas.penalty)}
       </div>
 
       <div className="mt-3 overflow-hidden rounded-card border border-line bg-card">
@@ -84,7 +152,7 @@ export function GoalKindsPanel({data}: {data: PlayerGoalKinds}) {
               </tr>
             </thead>
             <tbody>
-              {seasons.map((r) => (
+              {visiveis.map((r) => (
                 <tr
                   key={`${r.season}:${r.clubId ?? r.clubName}`}
                   className="border-b border-innerline last:border-b-0 hover:bg-hoverrow"
@@ -121,21 +189,21 @@ export function GoalKindsPanel({data}: {data: PlayerGoalKinds}) {
             <tfoot>
               <tr className="bg-soft font-extrabold">
                 <td className="px-4 py-2.5" colSpan={2}>
-                  Total
+                  {filtro ? `Total ${filtro}` : 'Total'}
                 </td>
-                <td className={CELULA}>{total.total}</td>
-                <td className={CELULA}>{num(total.rightFoot)}</td>
-                <td className={CELULA}>{num(total.leftFoot)}</td>
-                <td className={CELULA}>{num(total.head)}</td>
-                <td className={CELULA}>{num(total.penalty)}</td>
-                <td className={CELULA}>{num(total.other)}</td>
+                <td className={CELULA}>{somas.total}</td>
+                <td className={CELULA}>{num(somas.rightFoot)}</td>
+                <td className={CELULA}>{num(somas.leftFoot)}</td>
+                <td className={CELULA}>{num(somas.head)}</td>
+                <td className={CELULA}>{num(somas.penalty)}</td>
+                <td className={CELULA}>{num(somas.other)}</td>
               </tr>
             </tfoot>
           </table>
         </div>
       </div>
 
-      <p className="mt-2 text-[12px] text-faint">{rodape(total)}</p>
+      <p className="mt-2 text-[12px] text-faint">{rodape(somas)}</p>
     </section>
   );
 }
