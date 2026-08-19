@@ -24,6 +24,7 @@ import {
   parseLeagueOverview,
   parseMarketPlayers,
   parsePlayer,
+  parsePlayerGoals,
   parsePlayerInjuries,
   parseMatchGoals,
   parseRoundFirstKickoff,
@@ -1679,6 +1680,137 @@ function cachedConceded(id: string): Promise<SeasonConceded[]> {
     return [...bucket.values()]
       .map((r) => ({...r, clubName: names.get(r.clubId) ?? r.clubId}))
       .sort((a, b) => b.seasonId - a.seasonId || b.starts - a.starts);
+  });
+}
+
+// ---------- Como o jogador faz os gols ----------
+/** as contas de uma linha: quatro categorias, o resto e o total */
+export interface GoalKinds {
+  rightFoot: number;
+  leftFoot: number;
+  head: number;
+  penalty: number;
+  /** falta, contra-ataque, "sem mais detalhes" — tudo que não diz o "como" */
+  other: number;
+  total: number;
+}
+
+export interface SeasonGoalKinds extends GoalKinds {
+  /** rótulo da temporada como o TM escreve */
+  season: string;
+  clubId: string | null;
+  clubName: string;
+}
+
+export interface PlayerGoalKinds {
+  total: GoalKinds;
+  /** da temporada mais recente para a mais antiga */
+  seasons: SeasonGoalKinds[];
+}
+
+/**
+ * Em que categoria cai o rótulo que o Transfermarkt dá ao gol.
+ *
+ * PÊNALTI VEM ANTES DE TUDO
+ *
+ * O TM dá UM rótulo por gol, e para o pênalti ele é "Pênalti" — a perna que
+ * bateu não é publicada. Somar pênalti a "pé direito" seria inventar dado;
+ * deixá-lo fora das duas pernas é o que a fonte permite, e é também a leitura
+ * que interessa: gol de pênalti não descreve finalização em jogo.
+ *
+ * "REBOTE DE PÊNALTI" NÃO É PÊNALTI
+ *
+ * É o gol no rebote da defesa — jogada normal, com a perna que o TM não diz.
+ * Cai em "outros", e a ordem dos testes aqui existe para isso.
+ *
+ * O RESTO NÃO MENTE DE GRAÇA
+ *
+ * "Cobrança de falta", "Gol em contra-ataque", "Só empurrou pra dentro" e
+ * "Sem mais detalhes" não dizem parte do corpo nenhuma. Distribuí-los entre as
+ * pernas encheria as quatro colunas de números redondos e falsos; eles ficam
+ * em `other`, que a tela mostra em vez de esconder.
+ */
+function classificarGol(tipo: string): keyof Omit<GoalKinds, 'total'> {
+  const t = tipo
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  if (t.includes('rebote')) return 'other';
+  if (t.includes('penalti')) return 'penalty';
+  if (t.includes('pe direito')) return 'rightFoot';
+  if (t.includes('pe esquerdo')) return 'leftFoot';
+  if (t.includes('cabec') || t.includes('peito')) return 'head';
+  return 'other';
+}
+
+const ZERO: GoalKinds = {
+  rightFoot: 0,
+  leftFoot: 0,
+  head: 0,
+  penalty: 0,
+  other: 0,
+  total: 0,
+};
+
+/**
+ * Quantos gols o jogador fez de cada jeito — pé direito, pé esquerdo, cabeça
+ * e pênalti —, no total e temporada a temporada.
+ *
+ * PARA QUE SERVE
+ *
+ * É a contrapartida ofensiva do painel de gols sofridos: para um atacante, o
+ * total de gols já está em toda parte, e o que ele não conta é o repertório.
+ * Um centroavante de 40 gols com 30 de cabeça e um de 40 com 30 de perna
+ * canhota são dois jogadores diferentes, e a mesma cabeçada que descreve um
+ * pivô descreve mal um ponta.
+ *
+ * POR QUE POR TEMPORADA, E NÃO SÓ O TOTAL
+ *
+ * O total de carreira mistura o menino da segunda divisão norueguesa com o
+ * titular da Champions. A série mostra o que mudou — quem passou a bater os
+ * pênaltis, quem virou alvo de bola aérea ao trocar de time.
+ *
+ * O QUE ELE NÃO É
+ *
+ * Só gols POR CLUBE: a página de origem não lista gols por seleção (conferido
+ * em ago/2026), então o total daqui fica abaixo do total de carreira de quem
+ * joga por seleção. E "outros" não é sobra de parsing — é o pedaço que o
+ * Transfermarkt não descreve (falta, contra-ataque, "sem mais detalhes"), que
+ * fica visível justamente para o leitor saber o tamanho do que falta.
+ */
+export function getPlayerGoalKinds(
+  id: string,
+): Promise<PlayerGoalKinds | null> {
+  return cached(`goalkinds:${id}`, 6 * HOUR, async () => {
+    const gols = parsePlayerGoals(await tmHtml(`/-/alletore/spieler/${id}`));
+    if (!gols.length) return null;
+
+    // a página vem da temporada mais antiga para a mais nova; a ordem de
+    // inserção é a única cronologia confiável, porque os rótulos misturam
+    // "25/26" e "2026" e não dão para ordenar como texto
+    const linhas = new Map<string, SeasonGoalKinds>();
+    const total: GoalKinds = {...ZERO};
+
+    for (const g of gols) {
+      const chave = `${g.season}:${g.clubId ?? ''}`;
+      let linha = linhas.get(chave);
+      if (!linha) {
+        linha = {
+          ...ZERO,
+          season: g.season,
+          clubId: g.clubId,
+          clubName: g.clubName,
+        };
+        linhas.set(chave, linha);
+      }
+      const campo = classificarGol(g.type);
+      linha[campo] += 1;
+      linha.total += 1;
+      total[campo] += 1;
+      total.total += 1;
+    }
+
+    return {total, seasons: [...linhas.values()].reverse()};
   });
 }
 

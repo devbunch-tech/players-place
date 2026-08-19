@@ -1384,3 +1384,84 @@ export function parsePlayerInjuries(html: string): PlayerInjury[] {
   }
   return out;
 }
+
+// ---------- Todos os gols do jogador (com tipo de gol) ----------
+export interface GoalEvent {
+  /** rótulo da temporada como o TM escreve: "25/26" na Europa, "2026" aqui */
+  season: string;
+  /** clube pelo qual o gol foi feito */
+  clubId: string | null;
+  clubName: string;
+  /** rótulo cru do TM: "Chute com o pé direito", "Cabeçada", "Pênalti"… */
+  type: string;
+}
+
+/**
+ * Gol a gol de `/-/alletore/spieler/{id}`, a única página do Transfermarkt
+ * que diz COMO cada gol saiu.
+ *
+ * O TIPO DE GOL É UM RÓTULO SÓ, NÃO UMA COMBINAÇÃO
+ *
+ * Um pênalti batido de pé direito aparece como "Pênalti", nunca como as duas
+ * coisas. Então as categorias não se somam a partes do corpo: quem classifica
+ * (ver `classificarGol`) tem que assumir que pênalti tira o gol da conta de
+ * perna, e que "Gol em contra-ataque" ou "Só empurrou pra dentro" não dizem
+ * parte nenhuma do corpo — daí a coluna "Outros" existir na tela em vez de o
+ * resto ser jogado em "pé direito" por comodidade.
+ *
+ * A FORMA DA TABELA
+ *
+ * Uma linha por gol, agrupadas por linhas de temporada (`Temporada25/26`,
+ * um `td` só). Dois gols no mesmo jogo economizam as colunas do confronto:
+ * o segundo vem com um `td colspan=9` vazio e apenas minuto, placar e tipo —
+ * por isso clube e temporada são arrastados da última linha completa.
+ *
+ * SÓ GOLS POR CLUBE
+ *
+ * Gols por seleção não entram nesta página (conferido em ago/2026 com Messi:
+ * 802 gols listados, nenhum pela Argentina). Quem mostra o número tem que
+ * dizer isso — senão o total bate com nada que o leitor conheça.
+ */
+export function parsePlayerGoals(html: string): GoalEvent[] {
+  const root = parse(html);
+  // a tabela de gols não tem `class="items"` como as outras do site — a única
+  // marca estável dela é a própria coluna de tipo de gol
+  const table = root
+    .querySelectorAll('table')
+    .find((t) =>
+      foldLabel(t.querySelector('thead')?.text ?? '').includes('tipo de gol'),
+    );
+  if (!table) return [];
+
+  const out: GoalEvent[] = [];
+  let season = '';
+  let clubId: string | null = null;
+  let clubName = '';
+
+  for (const tr of table.querySelectorAll('tbody > tr')) {
+    const tds = tr.querySelectorAll(':scope > td');
+
+    // linha de temporada: um `td` com colspan cobrindo a tabela inteira
+    if (tds.length === 1) {
+      const t = clean(tds[0].text).replace(/^Temporada\s*/i, '');
+      if (t) season = t;
+      continue;
+    }
+    // minuto, placar e tipo são as três últimas colunas em qualquer variante
+    if (tds.length < 4) continue;
+
+    const link = tr.querySelector('a[href*="/verein/"]');
+    if (link) {
+      clubId = idFrom(link.getAttribute('href'), 'verein');
+      clubName = clean(link.getAttribute('title')) || clean(link.text);
+    }
+
+    out.push({
+      season,
+      clubId,
+      clubName,
+      type: clean(tds[tds.length - 1].text),
+    });
+  }
+  return out;
+}

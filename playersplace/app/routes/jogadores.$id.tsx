@@ -29,6 +29,7 @@ import {
   getPlayerRegistro,
   getPlayerCareer,
   getPlayerConcededAsStarter,
+  getPlayerGoalKinds,
   getPlayerInjuries,
   getPlayerGameLog,
   getPlayerMarketValueGraph,
@@ -62,6 +63,7 @@ import {PositionsPitch} from '~/components/PositionsPitch';
 import {MatchLog} from '~/components/MatchLog';
 import {StartsPanel} from '~/components/Starts';
 import {ConcededPanel} from '~/components/Conceded';
+import {GoalKindsPanel} from '~/components/GoalKinds';
 import {InjuryHistory, InjuryStatus} from '~/components/Injuries';
 import {Highlights} from '~/components/Highlights';
 import {
@@ -100,6 +102,12 @@ interface Topo {
    * atacante o mesmo número existe e não descreve nada.
    */
   defensor: boolean;
+  /**
+   * Centroavante, ponta ou segundo-atacante. Decide o painel de tipos de gol:
+   * a distribuição só descreve alguém com gols o bastante para ter uma, e é
+   * do atacante que se espera saber o repertório.
+   */
+  atacante: boolean;
 }
 
 function topoDaBase(b: JogadorBase): Topo {
@@ -115,6 +123,7 @@ function topoDaBase(b: JogadorBase): Topo {
     clube: b.clube ? {id: b.clube.id, nome: b.clube.nome} : null,
     goleiro: b.posicao.includes('Goleiro'),
     defensor: setorDaPosicao(b.posicao) === 'DEF',
+    atacante: setorDaPosicao(b.posicao) === 'ATA',
   };
 }
 
@@ -134,6 +143,7 @@ function topoDoPerfil(p: PlayerProfile): Topo {
     clube: p.club ? {id: p.club.id, nome: p.club.name} : null,
     goleiro: Boolean(p.info['Posição']?.includes('Goleiro')),
     defensor: setorDaPosicao(posicao) === 'DEF',
+    atacante: setorDaPosicao(posicao) === 'ATA',
   };
 }
 
@@ -311,6 +321,13 @@ export async function loader({params, context}: Route.LoaderArgs) {
     ? getPlayerConcededAsStarter(id).catch(() => [])
     : Promise.resolve([]);
 
+  // espelho do de cima, e pela mesma razão: a página de todos os gols é uma
+  // raspagem própria (a maior da rota — o Messi passa de 1 MB de HTML), e
+  // pedi-la para um zagueiro seria pagar por uma tabela que ninguém abre
+  const goalKindsPromise = topo.atacante
+    ? getPlayerGoalKinds(id).catch(() => null)
+    : Promise.resolve(null);
+
   const highlightPromise = getPlayerHighlight(
     id,
     topo.nome,
@@ -333,6 +350,7 @@ export async function loader({params, context}: Route.LoaderArgs) {
     gameLog: gameLogPromise,
     starts: startsPromise,
     conceded: concededPromise,
+    goalKinds: goalKindsPromise,
     injuries: injuriesPromise,
     absence: absencePromise,
     highlight: highlightPromise,
@@ -366,6 +384,7 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
     gameLog,
     starts,
     conceded,
+    goalKinds,
     injuries,
     absence,
     highlight,
@@ -527,6 +546,27 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
                 {(rows) =>
                   rows.length > 0 ? <ConcededPanel rows={rows} /> : null
                 }
+              </Await>
+            </Suspense>
+          ) : null}
+
+          {topo.atacante ? (
+            <Suspense
+              fallback={
+                <SkeletonTabela
+                  titulo="Como ele faz os gols"
+                  linhas={4}
+                  colunas={8}
+                />
+              }
+            >
+              <Await
+                resolve={goalKinds}
+                errorElement={
+                  <SecaoIndisponivel titulo="Como ele faz os gols" />
+                }
+              >
+                {(data) => (data ? <GoalKindsPanel data={data} /> : null)}
               </Await>
             </Suspense>
           ) : null}
