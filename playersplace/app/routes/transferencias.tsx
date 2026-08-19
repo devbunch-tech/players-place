@@ -6,6 +6,7 @@ import {
   getFreeAgents,
   getLatestTransfers,
   getTransferRecords,
+  MARKET_MIN_VALUES,
   type MarketList,
   type RumorClub,
 } from '~/lib/tm';
@@ -85,12 +86,13 @@ export async function loader({request}: Route.LoaderArgs) {
   const page = Math.max(1, Number(url.searchParams.get('page')) || 1);
   const nac = url.searchParams.get('nac');
   const pos = url.searchParams.get('pos');
+  const valor = url.searchParams.get('valor');
 
   if (tab === 'contratos' || tab === 'livres') {
     const market = await (
       tab === 'contratos'
-        ? getExpiringContracts(page, nac)
-        : getFreeAgents(page, nac, pos)
+        ? getExpiringContracts(page, nac, valor)
+        : getFreeAgents(page, nac, pos, valor)
     ).catch(() => null);
     return {tab, transfers: [], market};
   }
@@ -150,8 +152,18 @@ export default function Transferencias({loaderData}: Route.ComponentProps) {
                   <PositionFilter tab={tab} list={market} />
                 ) : null}
                 <NationalityFilter tab={tab} list={market} />
+                <ValueFilter tab={tab} list={market} />
               </div>
             </div>
+          ) : null}
+
+          {isMarket && market?.truncated ? (
+            <p className="mb-3 text-[12px] text-faint">
+              A lista de origem é longa demais para ser varrida inteira: o corte
+              olhou os {market.total} jogadores mais valiosos e pode haver
+              outros abaixo deles dentro desta faixa. Um valor mínimo mais alto
+              devolve a lista completa.
+            </p>
           ) : null}
 
           {isMarket && market && !market.rows.length ? (
@@ -232,9 +244,12 @@ function NationalityFilter({tab, list}: {tab: Tab; list: MarketList}) {
   return (
     <Form method="get" className="flex items-center gap-2">
       <input type="hidden" name="tab" value={tab} />
-      {/* trocar de país não pode derrubar a posição já escolhida */}
+      {/* trocar de país não pode derrubar os outros filtros já escolhidos */}
       {list.position ? (
         <input type="hidden" name="pos" value={list.position} />
+      ) : null}
+      {list.minValue ? (
+        <input type="hidden" name="valor" value={list.minValue} />
       ) : null}
       <label htmlFor="nac" className="text-[13px] font-semibold text-muted">
         Nacionalidade
@@ -272,6 +287,9 @@ function PositionFilter({tab, list}: {tab: Tab; list: MarketList}) {
       {list.country ? (
         <input type="hidden" name="nac" value={list.country} />
       ) : null}
+      {list.minValue ? (
+        <input type="hidden" name="valor" value={list.minValue} />
+      ) : null}
       {/* sem `page`: trocar de posição sempre volta para a primeira página */}
       <label htmlFor="pos" className="text-[13px] font-semibold text-muted">
         Posição
@@ -287,6 +305,47 @@ function PositionFilter({tab, list}: {tab: Tab; list: MarketList}) {
         {list.positions.map((p) => (
           <option key={p.id} value={p.id}>
             {p.name}
+          </option>
+        ))}
+      </select>
+    </Form>
+  );
+}
+
+/**
+ * O corte por valor de mercado.
+ *
+ * Diferente dos outros dois, este filtro não existe na origem: o Transfermarkt
+ * não oferece campo de valor em nenhuma das duas listas. Ele é aplicado sobre
+ * as linhas que buscamos, e por isso é de PISO e não de faixa — a explicação
+ * inteira está em `MARKET_MIN_VALUES`.
+ */
+function ValueFilter({tab, list}: {tab: Tab; list: MarketList}) {
+  const submit = useSubmit();
+  return (
+    <Form method="get" className="flex items-center gap-2">
+      <input type="hidden" name="tab" value={tab} />
+      {list.country ? (
+        <input type="hidden" name="nac" value={list.country} />
+      ) : null}
+      {list.position ? (
+        <input type="hidden" name="pos" value={list.position} />
+      ) : null}
+      <label htmlFor="valor" className="text-[13px] font-semibold text-muted">
+        Valor mínimo
+      </label>
+      {/* sem `page`: mexer no corte sempre volta para a primeira página */}
+      <select
+        id="valor"
+        name="valor"
+        defaultValue={list.minValue ?? ''}
+        onChange={(e) => void submit(e.currentTarget.form)}
+        className="h-10 max-w-[210px] rounded-btn border border-line bg-paper px-3 text-sm font-semibold"
+      >
+        <option value="">Qualquer valor</option>
+        {MARKET_MIN_VALUES.map((v) => (
+          <option key={v} value={v}>
+            {`€ ${v} mi`}
           </option>
         ))}
       </select>
@@ -339,6 +398,7 @@ function MarketTable({list, tab}: {list: MarketList; tab: Tab}) {
     const qs = new URLSearchParams({tab});
     if (list.country) qs.set('nac', list.country);
     if (list.position) qs.set('pos', list.position);
+    if (list.minValue) qs.set('valor', String(list.minValue));
     if (p > 1) qs.set('page', String(p));
     return `/transferencias?${qs.toString()}`;
   };

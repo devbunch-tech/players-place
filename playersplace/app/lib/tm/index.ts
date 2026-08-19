@@ -16,6 +16,7 @@ import {
   type TipoNome,
 } from './client';
 import {ehSuspensao, positionMeta} from './positions';
+import {euroToMillions} from '../format';
 import {
   parseClub,
   parseClubAbsences,
@@ -1856,6 +1857,16 @@ export interface MarketList {
   positions: {id: string; name: string}[];
   /** posição em uso (id de posição do Transfermarkt) ou null */
   position: string | null;
+  /** valor de mercado mínimo em uso, em milhões de euros, ou null */
+  minValue: number | null;
+  /** quantos jogadores passaram no corte de valor; null quando não há corte */
+  total: number | null;
+  /**
+   * O corte de valor não chegou ao fim da lista: bateu no teto de páginas da
+   * origem antes de encontrar o primeiro jogador abaixo do mínimo. Quem exibe
+   * tem que avisar — senão a lista parece completa e não é.
+   */
+  truncated: boolean;
 }
 
 /** id de país do TM; qualquer outra coisa vira "sem filtro" */
@@ -1865,6 +1876,47 @@ const landId = (v: string | null | undefined): string | null =>
 /** id de posição do TM (inclui os agrupamentos 98/99); resto vira "sem filtro" */
 const positionId = (v: string | null | undefined): string | null =>
   v && /^\d+$/.test(v) ? v : null;
+
+/**
+ * Os cortes de valor mínimo oferecidos na tela, em milhões de euros.
+ *
+ * POR QUE MÍNIMO, E NÃO UMA FAIXA "DE X ATÉ Y"
+ *
+ * O Transfermarkt não filtra estas duas listas por valor — nenhuma das duas
+ * páginas tem o campo —, então o corte é nosso, feito sobre as linhas que
+ * buscamos. O que salva a conta é o fato de a origem já ordenar as duas listas
+ * do mais valioso para o menos valioso: "acima de X" é sempre um PREFIXO da
+ * lista, e a varredura pode parar no primeiro jogador abaixo do corte.
+ *
+ * Um teto ("até € 5 mi") seria o contrário: obrigaria a atravessar tudo que
+ * está acima dele antes de mostrar a primeira linha. Em contratos a terminar
+ * isso são 856 páginas de origem — 21 mil jogadores — para montar uma tela de
+ * 15. Por isso o filtro é só de piso, e não uma faixa.
+ *
+ * O corte mais baixo é € 1 mi porque abaixo disso a varredura deixa de caber
+ * no teto (ver `MAX_SOURCE_PAGES_VALOR`) e a lista sairia truncada quase
+ * sempre — um filtro que quase nunca responde direito é pior que não ter.
+ */
+export const MARKET_MIN_VALUES = [1, 5, 10, 25, 50, 100] as const;
+
+/**
+ * Quantas páginas da origem a varredura por valor pode ler.
+ *
+ * Em contratos a terminar (25 por página) isso cobre os 300 mais valiosos, o
+ * que basta para todos os cortes de € 5 mi para cima; em jogadores livres (50
+ * por página, 5 páginas no total) cobre a lista inteira. Quando o teto corta
+ * antes da hora, `truncated` avisa em vez de a lista fingir estar completa.
+ */
+const MAX_SOURCE_PAGES_VALOR = 12;
+
+/** quantas páginas da origem a varredura pede de uma vez */
+const LOTE_VALOR = 4;
+
+/** valor mínimo pedido pela URL; qualquer coisa fora da lista vira "sem corte" */
+const minValueOf = (v: string | null | undefined): number | null => {
+  const n = Number(v);
+  return MARKET_MIN_VALUES.some((m) => m === n) ? n : null;
+};
 
 /** uma página da origem, do jeito que o Transfermarkt a pagina */
 function sourcePage(
@@ -1889,6 +1941,60 @@ function sourcePage(
 }
 
 /**
+ * Os jogadores acima do corte de valor, do topo da lista até o primeiro que
+ * fica abaixo dele.
+ *
+ * A PARADA ANTECIPADA É O ALGORITMO INTEIRO
+ *
+ * As duas listas de origem já vêm ordenadas por valor de mercado decrescente.
+ * Então o primeiro jogador abaixo do corte marca o fim: tudo dali para baixo
+ * também está, e nenhuma página seguinte precisa ser buscada. É o que torna o
+ * filtro viável sem varrer as 856 páginas de contratos a terminar.
+ *
+ * JOGADOR SEM VALOR PUBLICADO NÃO CORTA A LISTA
+ *
+ * "—" não é um valor baixo, é a ausência de um. Ele sai do resultado (não dá
+ * para afirmar que passa no corte) mas não interrompe a varredura, senão um
+ * único cadastro incompleto no meio do caminho encerraria a lista cedo demais.
+ */
+async function linhasAcimaDe(
+  path: string,
+  country: string | null,
+  position: string | null,
+  min: number,
+  first: MarketPlayerPage,
+): Promise<{rows: MarketPlayerRow[]; truncated: boolean}> {
+  const limite = Math.min(first.lastPage, MAX_SOURCE_PAGES_VALOR);
+  const rows: MarketPlayerRow[] = [];
+  let cortou = false;
+
+  for (let n = 1; n <= limite && !cortou; n += LOTE_VALOR) {
+    const lote = await Promise.all(
+      Array.from({length: Math.min(LOTE_VALOR, limite - n + 1)}, (_, i) =>
+        n + i === 1
+          ? Promise.resolve(first)
+          : sourcePage(path, n + i, country, position),
+      ),
+    );
+    for (const sp of lote) {
+      for (const row of sp.rows) {
+        const v = euroToMillions(row.value);
+        if (v === null) continue;
+        if (v < min) {
+          cortou = true;
+          break;
+        }
+        rows.push(row);
+      }
+      if (cortou) break;
+    }
+  }
+
+  // sem corte encontrado, só é lista completa se a origem acabou antes do teto
+  return {rows, truncated: !cortou && limite < first.lastPage};
+}
+
+/**
  * O Transfermarkt pagina estas listas com tamanho próprio (25 em contratos a
  * terminar, 50 em jogadores sem contrato) e nós queremos 15 por página. Em vez
  * de fixar esses números, medimos o tamanho na página 1 — que sempre buscamos,
@@ -1897,28 +2003,64 @@ function sourcePage(
  *
  * `totalPages` é deliberadamente conservador: conta só os itens garantidos
  * pelas páginas cheias da origem, para que nenhuma página nossa apareça vazia.
+ *
+ * COM CORTE DE VALOR O CAMINHO É OUTRO
+ *
+ * Aí não dá para mapear a janela direto na paginação da origem: quantas linhas
+ * sobram por página só se sabe depois de ler os valores. A lista filtrada é
+ * montada inteira (ver `linhasAcimaDe` — a parada antecipada é o que mantém
+ * isso barato) e recortada aqui. Em compensação `totalPages` deixa de ser uma
+ * estimativa e passa a ser o número exato de páginas.
  */
 async function marketList(
   path: string,
   page: number,
   nationality?: string | null,
   pos?: string | null,
+  valor?: string | null,
 ): Promise<MarketList> {
   const country = landId(nationality);
   const position = positionId(pos);
+  const minValue = minValueOf(valor);
   const first = await sourcePage(path, 1, country, position);
   const {countries, positions} = first;
   const size = first.rows.length;
+  const base = {
+    title: first.title,
+    countries,
+    country,
+    positions,
+    position,
+    minValue,
+  };
   if (!size) {
     return {
+      ...base,
       rows: [],
       page: 1,
       totalPages: 1,
-      title: first.title,
-      countries,
+      total: minValue === null ? null : 0,
+      truncated: false,
+    };
+  }
+
+  if (minValue !== null) {
+    const {rows: acima, truncated} = await linhasAcimaDe(
+      path,
       country,
-      positions,
       position,
+      minValue,
+      first,
+    );
+    const totalPages = Math.max(1, Math.ceil(acima.length / MARKET_PER_PAGE));
+    const p = Math.min(Math.max(1, Math.floor(page) || 1), totalPages);
+    return {
+      ...base,
+      rows: acima.slice((p - 1) * MARKET_PER_PAGE, p * MARKET_PER_PAGE),
+      page: p,
+      totalPages,
+      total: acima.length,
+      truncated,
     };
   }
 
@@ -1942,16 +2084,7 @@ async function marketList(
     .flatMap((sp) => sp.rows)
     .slice(offset, offset + MARKET_PER_PAGE);
 
-  return {
-    rows,
-    page: p,
-    totalPages,
-    title: first.title,
-    countries,
-    country,
-    positions,
-    position,
-  };
+  return {...base, rows, page: p, totalPages, total: null, truncated: false};
 }
 
 /** clubes ligados a um jogador nos rumores abertos do Transfermarkt */
@@ -1974,11 +2107,14 @@ export function getPlayerRumors(id: string): Promise<RumorClub[]> {
 export async function getExpiringContracts(
   page = 1,
   nationality?: string | null,
+  valor?: string | null,
 ): Promise<MarketList> {
   const list = await marketList(
     '/statistik/endendevertraege',
     page,
     nationality,
+    null,
+    valor,
   );
   const rows = await Promise.all(
     list.rows.map(async (row) => {
@@ -1995,11 +2131,13 @@ export function getFreeAgents(
   page = 1,
   nationality?: string | null,
   position?: string | null,
+  valor?: string | null,
 ): Promise<MarketList> {
   return marketList(
     '/statistik/vertragslosespieler',
     page,
     nationality,
     position,
+    valor,
   );
 }
