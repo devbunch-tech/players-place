@@ -28,6 +28,7 @@ import {
   getClubAbsences,
   getPlayerRegistro,
   getPlayerCareer,
+  getPlayerConcededAsStarter,
   getPlayerInjuries,
   getPlayerGameLog,
   getPlayerMarketValueGraph,
@@ -35,6 +36,7 @@ import {
   getPlayerPerformance,
   getPlayerStartsBySeason,
   getPlayerTransfers,
+  setorDaPosicao,
   type PlayerProfile,
 } from '~/lib/tm';
 import {getDb} from '~/lib/db';
@@ -59,6 +61,7 @@ import {PerformancePanel} from '~/components/Performance';
 import {PositionsPitch} from '~/components/PositionsPitch';
 import {MatchLog} from '~/components/MatchLog';
 import {StartsPanel} from '~/components/Starts';
+import {ConcededPanel} from '~/components/Conceded';
 import {InjuryHistory, InjuryStatus} from '~/components/Injuries';
 import {Highlights} from '~/components/Highlights';
 import {
@@ -92,6 +95,11 @@ interface Topo {
   valor: string;
   clube: {id: string; nome: string} | null;
   goleiro: boolean;
+  /**
+   * Zagueiro, lateral ou líbero. Decide o painel de gols sofridos: para um
+   * atacante o mesmo número existe e não descreve nada.
+   */
+  defensor: boolean;
 }
 
 function topoDaBase(b: JogadorBase): Topo {
@@ -106,6 +114,7 @@ function topoDaBase(b: JogadorBase): Topo {
     valor: b.valor,
     clube: b.clube ? {id: b.clube.id, nome: b.clube.nome} : null,
     goleiro: b.posicao.includes('Goleiro'),
+    defensor: setorDaPosicao(b.posicao) === 'DEF',
   };
 }
 
@@ -124,6 +133,7 @@ function topoDoPerfil(p: PlayerProfile): Topo {
     valor: p.marketValue,
     clube: p.club ? {id: p.club.id, nome: p.club.name} : null,
     goleiro: Boolean(p.info['Posição']?.includes('Goleiro')),
+    defensor: setorDaPosicao(posicao) === 'DEF',
   };
 }
 
@@ -293,6 +303,14 @@ export async function loader({params, context}: Route.LoaderArgs) {
         .catch(() => null)
     : Promise.resolve(null);
 
+  // só para defensores, e por isso depois do `topo`: o agregado tem chave de
+  // cache própria, e calculá-lo para um atacante gravaria uma linha que
+  // nenhuma página vai ler. Sair aqui não atrasa nada — a resposta bruta é a
+  // mesma da súmula de jogos, que já partiu lá em cima
+  const concededPromise = topo.defensor
+    ? getPlayerConcededAsStarter(id).catch(() => [])
+    : Promise.resolve([]);
+
   const highlightPromise = getPlayerHighlight(
     id,
     topo.nome,
@@ -314,6 +332,7 @@ export async function loader({params, context}: Route.LoaderArgs) {
     national: nationalPromise,
     gameLog: gameLogPromise,
     starts: startsPromise,
+    conceded: concededPromise,
     injuries: injuriesPromise,
     absence: absencePromise,
     highlight: highlightPromise,
@@ -346,6 +365,7 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
     national,
     gameLog,
     starts,
+    conceded,
     injuries,
     absence,
     highlight,
@@ -487,6 +507,29 @@ export default function Jogador({loaderData}: Route.ComponentProps) {
               {(rows) => (rows.length > 0 ? <StartsPanel rows={rows} /> : null)}
             </Await>
           </Suspense>
+
+          {topo.defensor ? (
+            <Suspense
+              fallback={
+                <SkeletonTabela
+                  titulo="Gols sofridos como titular"
+                  linhas={4}
+                  colunas={7}
+                />
+              }
+            >
+              <Await
+                resolve={conceded}
+                errorElement={
+                  <SecaoIndisponivel titulo="Gols sofridos como titular" />
+                }
+              >
+                {(rows) =>
+                  rows.length > 0 ? <ConcededPanel rows={rows} /> : null
+                }
+              </Await>
+            </Suspense>
+          ) : null}
 
           <Suspense
             fallback={

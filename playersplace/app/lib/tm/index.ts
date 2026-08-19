@@ -1322,7 +1322,7 @@ interface ApiGameItem {
       opponentGoalsOnThePitch: number;
     };
     cardStatistics: {yellowCardNet: number};
-    playingTimeStatistics: {playedMinutes: number | null};
+    playingTimeStatistics: {playedMinutes: number | null; isStarting: boolean};
   };
 }
 
@@ -1416,12 +1416,49 @@ export async function getPlayerGameLog(
   return log;
 }
 
-function cachedGameLog(id: string): Promise<PlayerGameLog | null> {
-  return cached(`games:${id}`, 6 * HOUR, async () => {
+/**
+ * Resposta bruta de jogo a jogo, reaproveitada pelos agregados.
+ *
+ * Mesmo arranjo de `perfraw:`: a súmula (`games:`) e os gols sofridos como
+ * titular (`conceded:`) são duas leituras da MESMA resposta. Sem esta chave
+ * intermediária, abrir a página de um zagueiro compraria o JSON duas vezes.
+ */
+function getRawGamePerformance(id: string): Promise<ApiGameItem[]> {
+  return cached(`gameraw:${id}`, 6 * HOUR, async () => {
     const res = await tmApiJson<{data?: {performance?: ApiGameItem[]}}>(
       `/player/${id}/performance-game`,
     );
-    const items = res.data?.performance ?? [];
+    return res.data?.performance ?? [];
+  });
+}
+
+/**
+ * O rótulo que uma temporada usa na maioria dos jogos.
+ *
+ * A mesma temporada aparece como "2025" nas ligas de ano-calendário e "24/25"
+ * nas europeias; quem atuou nos dois calendários no mesmo ano teria duas
+ * grafias para o mesmo `seasonId`. Fixamos a mais frequente.
+ */
+function rotuloPorTemporada(
+  items: ApiGameItem[],
+): (seasonId: number, fallback: string) => string {
+  const votos = new Map<number, Map<string, number>>();
+  for (const it of items) {
+    const {seasonId, season} = it.gameInformation;
+    let v = votos.get(seasonId);
+    if (!v) votos.set(seasonId, (v = new Map()));
+    v.set(season.display, (v.get(season.display) ?? 0) + 1);
+  }
+  return (seasonId, fallback) => {
+    const v = votos.get(seasonId);
+    if (!v) return fallback;
+    return [...v.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  };
+}
+
+function cachedGameLog(id: string): Promise<PlayerGameLog | null> {
+  return cached(`games:${id}`, 6 * HOUR, async () => {
+    const items = await getRawGamePerformance(id);
     if (!items.length) return null;
 
     // posições consideram apenas jogos disputados, em toda a carreira
@@ -1524,6 +1561,124 @@ function cachedGameLog(id: string): Promise<PlayerGameLog | null> {
       positions: [...byPosition.values()].sort((a, b) => b.games - a.games),
       seasons,
     };
+  });
+}
+
+// ---------- Gols sofridos como titular ----------
+export interface SeasonConceded {
+  seasonId: number;
+  label: string;
+  clubId: string;
+  clubName: string;
+  /** jogos que ele COMEÇOU jogando */
+  starts: number;
+  /** minutos que ele passou em campo nesses jogos */
+  minutes: number;
+  /** gols sofridos pelo time ENQUANTO ele estava em campo */
+  conceded: number;
+  /** jogos como titular em que não sofreu nenhum gol com ele em campo */
+  cleanSheets: number;
+}
+
+/**
+ * Quantos gols o time levou com o jogador em campo, temporada a temporada,
+ * contando só os jogos em que ele foi titular.
+ *
+ * PARA QUE SERVE
+ *
+ * Gol sofrido é a única estatística defensiva que o Transfermarkt publica por
+ * jogo, e sozinha ela diz pouco: um zagueiro de time pequeno leva mais gols
+ * que um de time grande jogando igual ou melhor. O que dá para ler aqui é a
+ * SÉRIE — a mesma pessoa, ano a ano, e a comparação entre companheiros do
+ * mesmo elenco. Por isso a tabela é por temporada e por clube, e nunca vira
+ * um número solto no topo da página.
+ *
+ * O QUE O NÚMERO É, EXATAMENTE
+ *
+ * `opponentGoalsOnThePitch` conta os gols que entraram COM ELE EM CAMPO, não
+ * os que o time levou no jogo. Um titular substituído aos 60' não carrega o
+ * gol sofrido aos 80' — que é justamente o recorte pedido, e a razão de a
+ * coluna de minutos vir junto: sem ela, "12 gols em 20 jogos" não distingue
+ * quem jogou 1800 minutos de quem saiu no intervalo toda semana.
+ *
+ * POR QUE SÓ TITULAR
+ *
+ * Entrar aos 85' com o time perdendo por 3 contamina a média com um jogo que
+ * não foi dele. Quem começou jogando teve o time montado à sua volta, e é a
+ * amostra que se compara entre temporadas.
+ *
+ * INCLUI SELEÇÃO
+ *
+ * Jogos por seleção entram como qualquer outro clube — a linha tem coluna de
+ * clube, então não há mistura silenciosa, e tirá-los esconderia dado real.
+ * É a mesma escolha de `getPlayerStartsBySeason`, com que esta tabela é lida
+ * lado a lado.
+ */
+export async function getPlayerConcededAsStarter(
+  id: string,
+): Promise<SeasonConceded[]> {
+  const linhas = await cachedConceded(id);
+  await repararNomes(
+    linhas
+      .filter((l) => l.clubName === l.clubId)
+      .map((l) => ({
+        tipo: 'clube' as const,
+        id: l.clubId,
+        aplicar: (nome: string) => {
+          l.clubName = nome;
+        },
+      })),
+  );
+  return linhas;
+}
+
+function cachedConceded(id: string): Promise<SeasonConceded[]> {
+  return cached(`conceded:${id}`, 6 * HOUR, async () => {
+    const items = await getRawGamePerformance(id);
+    if (!items.length) return [];
+
+    const rotulo = rotuloPorTemporada(items);
+    const bucket = new Map<
+      string,
+      Omit<SeasonConceded, 'clubName'> & {clubName?: string}
+    >();
+
+    for (const it of items) {
+      const st = it.statistics;
+      // `isStarting` sozinho não basta: relacionado escalado que não entrou
+      // aparece com participationState != 'played' e minutos nulos
+      if (st.generalStatistics.participationState !== 'played') continue;
+      if (!st.playingTimeStatistics.isStarting) continue;
+
+      const {seasonId, season} = it.gameInformation;
+      const {clubId} = it.clubsInformation.club;
+      const key = `${seasonId}:${clubId}`;
+      let row = bucket.get(key);
+      if (!row) {
+        row = {
+          seasonId,
+          label: rotulo(seasonId, season.display),
+          clubId,
+          starts: 0,
+          minutes: 0,
+          conceded: 0,
+          cleanSheets: 0,
+        };
+        bucket.set(key, row);
+      }
+      const sofridos = st.goalStatistics.opponentGoalsOnThePitch ?? 0;
+      row.starts += 1;
+      row.minutes += st.playingTimeStatistics.playedMinutes ?? 0;
+      row.conceded += sofridos;
+      if (sofridos === 0) row.cleanSheets += 1;
+    }
+
+    const names = await fetchClubNames([
+      ...new Set([...bucket.values()].map((r) => r.clubId)),
+    ]);
+    return [...bucket.values()]
+      .map((r) => ({...r, clubName: names.get(r.clubId) ?? r.clubId}))
+      .sort((a, b) => b.seasonId - a.seasonId || b.starts - a.starts);
   });
 }
 
